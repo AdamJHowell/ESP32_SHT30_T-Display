@@ -3,14 +3,14 @@
  * This sketch will use a HT30 sensor (0x44) to show temperature and humidity.
  * The ESP-32 SDA pin is GPIO21, and SCL is GPIO22.
  */
-#include <TFT_eSPI.h>				// The graphics library for the embedded display.
-#include <SPI.h>
-#include "WiFi.h"						// The network client for the ESP32 WiFi chipset.
-#include <Wire.h>						// Include the Wire library, required for I2C devices.
-#include "esp_adc_cal.h"			// ESP analog to digital conversion library used for reading voltages.
-#include "bmp.h"						// This contains bitmap information for the boot image.
-#include "ClosedCube_SHT31D.h"	// Include the ClosedCube library for HT-30 sensor at 0x44.
-#include <PubSubClient.h>			// PubSub is the MQTT API.  Author: Nick O'Leary
+#include <TFT_eSPI.h>				// This header is included in https://github.com/Xinyuan-LilyGO/TTGO-T-Display
+#include <SPI.h>						// This header is added to the IDE libraries after the ESP32 is added in board manager.
+#include "WiFi.h"						// This header is added to the IDE libraries after the ESP32 is added in board manager.
+#include <Wire.h>						// This header is part of the standard library.  https://www.arduino.cc/en/reference/wire
+#include "esp_adc_cal.h"			// This header is added to the IDE libraries after the ESP32 is added in board manager.
+#include "bmp.h"						// Created at http://www.rinkydinkelectronics.com/t_imageconverter565.php
+#include "ClosedCube_SHT31D.h"	// This header is used to read from the HT30 sensor.  https://github.com/closedcube/ClosedCube_SHT31D_Arduino
+#include <PubSubClient.h>			// PubSub is the MQTT API.  Author: Nick O'Leary  https://github.com/knolleary/pubsubclient
 #include "privateInfo.h"			// I use this file to hide my network information from random people browsing my GitHub repo.
 #include <ThingSpeak.h>				// The library used to publish to ThingSpeak.
 
@@ -22,17 +22,17 @@
  * Adjust the commented-out variables to match your network and broker settings.
  * The commented-out variables are stored in "privateInfo.h", which I do not upload to GitHub.
  */
-//const char* wifiSsid = "yourSSID";
-//const char* wifiPassword = "yourPassword";
-//const char* mqttBroker = "yourBrokerAddress";
-//const int mqttPort = 1883;
+//const char* wifiSsid = "yourSSID";				// Typically kept in "privateInfo.h".
+//const char* wifiPassword = "yourPassword";		// Typically kept in "privateInfo.h".
+//const char* mqttBroker = "yourBrokerAddress";	// Typically kept in "privateInfo.h".
+//const int mqttPort = 1883;							// Typically kept in "privateInfo.h".
 const char* mqttTopic = "ajhWeather";
 char clientAddress[16];
 char macAddress[18];
 // Provo Airport: https://forecast.weather.gov/data/obhistory/KPVU.html
 // ThingSpeak variables
 unsigned long myChannelNumber = 1;
-//const char* myWriteAPIKey = "yourWriteKey";
+//const char* myWriteAPIKey = "yourWriteKey";	// Typically kept in "privateInfo.h".
 
 // Create class objects.
 WiFiClient espClient;
