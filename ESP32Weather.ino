@@ -12,7 +12,6 @@
 #include "ClosedCube_SHT31D.h"	// This header is used to read from the HT30 sensor.  https://github.com/closedcube/ClosedCube_SHT31D_Arduino
 #include <PubSubClient.h>			// PubSub is the MQTT API.  Author: Nick O'Leary  https://github.com/knolleary/pubsubclient
 #include "privateInfo.h"			// I use this file to hide my network information from random people browsing my GitHub repo.
-#include <ThingSpeak.h>				// The library used to publish to ThingSpeak.
 
 #define ADC_EN					14  // ADC_EN is the ADC detection enable port.
 #define ADC_PIN				34
@@ -40,6 +39,7 @@ PubSubClient mqttClient( espClient );		// MQTT client.
 TFT_eSPI tft = TFT_eSPI( 135, 240 );		// Graphics library.
 ClosedCube_SHT31D sht3xd;						// SH30 library.
 int loopCount = 0;
+int vref = 1100;
 
 
 // This function puts the ESP into shallow sleep, which saves power compared to the traditional delay().
@@ -51,6 +51,61 @@ void espDelay( int ms )
 }
 
 
+String showVoltage()
+{
+	String voltage;
+	static uint64_t timeStamp = 0;
+	if( millis() - timeStamp > 1000 )
+	{
+		timeStamp = millis();
+		uint16_t v = analogRead( ADC_PIN );
+		float battery_voltage = (( float )v / 4095.0 ) * 2.0 * 3.3 * ( vref / 1000.0 );
+		voltage = "Voltage :" + String( battery_voltage ) + "V";
+	}
+	return voltage;
+} // End of showVoltage()
+
+
+void printResult( String text, SHT31D result, String voltage )
+{
+	if( result.error == SHT3XD_NO_ERROR )
+	{
+		Serial.print( text );
+		Serial.print( ": T=" );
+		Serial.print( result.t );
+		Serial.print( "C, RH=" );
+		Serial.print( result.rh );
+		Serial.println( "%" );
+		Serial.println( voltage );
+
+		tft.fillScreen( TFT_BLACK );
+		tft.setTextDatum( MC_DATUM );
+		// DrawString cannot print a float, so it needs to be inserted into a String.
+		String tempBuffer;
+		tempBuffer += F( "Temp : " );
+		tempBuffer += String( result.t );
+		// This display does not handle the degree symbol well.
+		tempBuffer += F( "°C");
+		// Draw this line 16 pixels above middle.
+		tft.drawString( tempBuffer,  tft.width() / 2, tft.height() / 2 - 16 );
+		String humidityBuffer;
+		humidityBuffer += F( "Humidity : " );
+		humidityBuffer += String( result.rh );
+		humidityBuffer += F( "%");
+		// Draw this line centered vertically and horizontally.
+		tft.drawString( humidityBuffer,  tft.width() / 2, tft.height() / 2 );
+		// Draw this line 16 pixels below middle.
+		tft.drawString( voltage,	tft.width() / 2, tft.height() / 2 + 16 );
+	}
+	else
+	{
+		Serial.print( text );
+		Serial.print( ": [ERROR] Code #" );
+		Serial.println( result.error );
+	}
+} // End of printResult()
+
+
 /**
  * mqttConnect() will attempt to (re)connect the MQTT client.
  */
@@ -59,12 +114,10 @@ void mqttConnect()
 	// Loop until MQTT has connected.
 	while( !mqttClient.connected() )
 	{
-		digitalWrite( mqttLED, 1 );						// Turn the MQTT LED off.
 		Serial.print( "Attempting MQTT connection..." );
 		if( mqttClient.connect( "ESP8266 Client" ) ) // Attempt to mqttConnect using the designated clientID.
 		{
 			Serial.println( "connected!" );
-			digitalWrite( mqttLED, 0 );					// Turn the MQTT LED on.
 		}
 		else
 		{
@@ -88,9 +141,37 @@ void setup()
 	Serial.begin( 115200 );
 	delay( 10 );
 	Serial.println( '\n' );
-	pinMode( wifiLED, OUTPUT );	// Initialize digital pin WiFi LED as an output.
-	pinMode( mqttLED, OUTPUT );	// Initialize digital pin MQTT LED as an output.
+	Wire.begin();
+	sht3xd.begin( 0x44 ); // I2C address: 0x44 or 0x45
 
+	Serial.print( "Serial #" );
+	Serial.println( sht3xd.readSerialNumber() );
+	if( sht3xd.periodicStart( SHT3XD_REPEATABILITY_HIGH, SHT3XD_FREQUENCY_10HZ ) != SHT3XD_NO_ERROR )
+		Serial.println( "[ERROR] Cannot start periodic mode" );
+
+	/*
+	ADC_EN is the ADC detection enable port.
+	If the USB port is used for power supply, it is turned on by default.
+	If it is powered by battery, it needs to be set to high level.
+	*/
+	pinMode( ADC_EN, OUTPUT );
+	digitalWrite( ADC_EN, HIGH );
+
+	tft.init();
+	tft.setRotation( 1 );
+	tft.fillScreen( TFT_BLACK );
+	tft.setTextSize( 2 );
+	tft.setTextColor( TFT_GREEN );
+	tft.setCursor( 0, 0 );
+	tft.setTextDatum( MC_DATUM );
+	tft.setTextSize( 1 );
+
+	tft.setSwapBytes( true );
+	tft.pushImage( 0, 0,	240, 135, daughters );
+	espDelay( 5000 );
+	tft.setRotation( 0 );
+	tft.fillScreen( TFT_BLACK );
+	tft.setTextDatum( MC_DATUM );
 
 	// Set the MQTT client parameters.
 	mqttClient.setServer( mqttBroker, mqttPort );
@@ -103,7 +184,6 @@ void setup()
 	// Connect to the WiFi network.
 	Serial.printf( "Wi-Fi mode set to WIFI_STA %s\n", WiFi.mode( WIFI_STA ) ? "" : "Failed!" );
 	WiFi.begin( wifiSsid, wifiPassword );
-	ThingSpeak.begin( espClient );  // Initialize ThingSpeak
 
 	int i = 0;
 	/*
@@ -117,7 +197,6 @@ void setup()
 	// Loop until WiFi has connected.
 	while( WiFi.status() != WL_CONNECTED )
 	{
-		digitalWrite( wifiLED, 1 );	// Turn the WiFi LED off.
 		delay( 1000 );
 		Serial.println( "Waiting for a connection..." );
 		Serial.print( "WiFi status: " );
@@ -135,16 +214,6 @@ void setup()
 	Serial.print( "IP address: " );
 	snprintf( clientAddress, 16, "%d.%d.%d.%d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3] );
 	Serial.println( clientAddress );
-	digitalWrite( wifiLED, 0 );	// Turn the WiFi LED on.
-
-	Serial.println( "Attempting to connect to the BMP280." );
-	if( !bmp280.begin( BMP280_I2C_ADDRESS ) )
-	{
-		Serial.println( "Could not find a valid BMP280 sensor, Check wiring!" );
-		while( 1 )
-			;
-	}
-	Serial.println( "Connected to the BMP280!\n" );
 } // End of setup() function.
 
 
@@ -161,14 +230,6 @@ void loop()
 	// Sleep the CPU for 5 seconds.
 	espDelay( 5000 );
 
-	//wifi_scan();
-	//espDelay( 5000 );
-
-	// These next 3 lines act as a "heartbeat", to give local users an indication that the system is working.
-	digitalWrite( wifiLED, 1 );	// Turn the WiFi LED off to alert the user that a reading is about to take place.
-	delay( 1000 );						// Wait for one second.
-	digitalWrite( wifiLED, 0 );	// Turn the WiFi LED on.
-
 	Serial.println();
 	// Check the mqttClient connection state.
 	if( !mqttClient.connected() )
@@ -178,35 +239,23 @@ void loop()
 	}
 	mqttClient.loop();
 
-	// Get temperature, pressure and altitude from the Adafruit BMP280 library.
-	// Temperature is always a floating point in Centigrade units. Pressure is a 32 bit integer in Pascal units.
-	float temperature = bmp280.readTemperature();	 				// Get temperature.
-	float pressure = bmp280.readPressure();			 				// Get pressure.
-	float altitude_ = bmp280.readAltitude( seaLevelPressure );	// Get altitude based on the sea level pressure for your location.
+	// Print the results to the onboard TFT screen.
+	printResult( "Periodic Mode", sht3xd.periodicFetchData(), voltage );
+
+	// Get temperature and relative humidity from the SHT30 library.
+	// Temperature is always a floating point in Centigrade units. Relative humidity is a 32 bit integer in Pascal units.
+	float temperature = sht3xd.periodicFetchData().t;	 				// Get temperature.
+	float humidity = sht3xd.periodicFetchData().rh;			 				// Get relative humidity.
 
 	// Prepare a String to hold the JSON.
 	char mqttString[256];
 	// Write the readings to the String in JSON format.
-	snprintf( mqttString, 256, "{\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"tempC\": %.1f,\n\t\"presP\": %.1f,\n\t\"altM\": %.1f\n}", macAddress, clientAddress, temperature, pressure, altitude_ );
+	snprintf( mqttString, 256, "{\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"tempC\": %.1f,\n\t\"humidity\": %.1f\n}", macAddress, clientAddress, temperature, humidity );
 	// Publish the JSON to the MQTT broker.
 	mqttClient.publish( mqttTopic, mqttString );
 	// Print the JSON to the Serial port.
 	Serial.println( mqttString );
 
-	// Set the ThingSpeak fields.
-	ThingSpeak.setField(1, temperature);
-	ThingSpeak.setField(2, pressure);
-	ThingSpeak.setField(3, altitude_);
-	int x = ThingSpeak.writeFields(myChannelNumber, myWriteAPIKey);
-	if(x == 200)
-	{
-   	Serial.println("Thingspeak update successful.");
-   }
-   else
-	{
-   	Serial.println("Problem updating channel. HTTP error code " + String(x));
-   }
-
 	Serial.println( "Pausing for 60 seconds..." );
-	delay( 60000 );	// Wait for 60 seconds.
+	espDelay( 60000 );	// Wait for 60 seconds.
 } // End of loop() function.
