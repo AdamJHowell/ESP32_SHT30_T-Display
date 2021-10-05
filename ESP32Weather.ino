@@ -32,6 +32,7 @@ char macAddress[18];
 // ThingSpeak variables
 unsigned long myChannelNumber = 1;
 //const char* myWriteAPIKey = "yourWriteKey";	// Typically kept in "privateInfo.h".
+String ht30SerialNumber = "";
 
 // Create class objects.
 WiFiClient espClient;
@@ -51,58 +52,38 @@ void espDelay( int ms )
 }
 
 
-String showVoltage()
+float getVoltage()
 {
-	String voltage;
-	static uint64_t timeStamp = 0;
-	if( millis() - timeStamp > 1000 )
-	{
-		timeStamp = millis();
-		uint16_t v = analogRead( ADC_PIN );
-		float battery_voltage = (( float )v / 4095.0 ) * 2.0 * 3.3 * ( vref / 1000.0 );
-		voltage = "Voltage :" + String( battery_voltage ) + "V";
-	}
-	return voltage;
-} // End of showVoltage()
+	uint16_t adcValue = analogRead( ADC_PIN );
+	return ( ( float ) adcValue / 4095.0 ) * 2.0 * 3.3 * ( vref / 1000.0 );
+} // End of getVoltage()
 
 
-void printResult( String text, SHT31D result, String voltage )
+void printResult( String text, float temperature, float humidity, String voltage )
 {
-	if( result.error == SHT3XD_NO_ERROR )
-	{
-		Serial.print( text );
-		Serial.print( ": T=" );
-		Serial.print( result.t );
-		Serial.print( "C, RH=" );
-		Serial.print( result.rh );
-		Serial.println( "%" );
-		Serial.println( voltage );
+	tft.fillScreen( TFT_BLACK );
+	tft.setTextDatum( MC_DATUM );
 
-		tft.fillScreen( TFT_BLACK );
-		tft.setTextDatum( MC_DATUM );
-		// DrawString cannot print a float, so it needs to be inserted into a String.
-		String tempBuffer;
-		tempBuffer += F( "Temp : " );
-		tempBuffer += String( result.t );
-		// This display does not handle the degree symbol well.
-		tempBuffer += F( "°C");
-		// Draw this line 16 pixels above middle.
-		tft.drawString( tempBuffer,  tft.width() / 2, tft.height() / 2 - 16 );
-		String humidityBuffer;
-		humidityBuffer += F( "Humidity : " );
-		humidityBuffer += String( result.rh );
-		humidityBuffer += F( "%");
-		// Draw this line centered vertically and horizontally.
-		tft.drawString( humidityBuffer,  tft.width() / 2, tft.height() / 2 );
-		// Draw this line 16 pixels below middle.
-		tft.drawString( voltage,	tft.width() / 2, tft.height() / 2 + 16 );
-	}
-	else
-	{
-		Serial.print( text );
-		Serial.print( ": [ERROR] Code #" );
-		Serial.println( result.error );
-	}
+	// DrawString cannot print a float, so it needs to be inserted into a String.
+	String tempBuffer;
+	tempBuffer += F( "Temp : " );
+	tempBuffer += String( temperature );
+	// This display does not handle the degree symbol well.
+	tempBuffer += F( "°C");
+
+	String humidityBuffer;
+	humidityBuffer += F( "Humidity : " );
+	humidityBuffer += String( humidity );
+	humidityBuffer += F( "%");
+
+	// Draw this line 16 pixels above middle.
+	tft.drawString( tempBuffer,  tft.width() / 2, tft.height() / 2 - 16 );
+
+	// Draw this line centered vertically and horizontally.
+	tft.drawString( humidityBuffer,  tft.width() / 2, tft.height() / 2 );
+
+	// Draw this line 16 pixels below middle.
+	tft.drawString( voltage,	tft.width() / 2, tft.height() / 2 + 16 );
 } // End of printResult()
 
 
@@ -115,7 +96,7 @@ void mqttConnect()
 	while( !mqttClient.connected() )
 	{
 		Serial.print( "Attempting MQTT connection..." );
-		if( mqttClient.connect( "ESP8266 Client" ) ) // Attempt to mqttConnect using the designated clientID.
+		if( mqttClient.connect( "ESP32 Client" ) ) // Attempt to mqttConnect using the designated clientID.
 		{
 			Serial.println( "connected!" );
 		}
@@ -144,8 +125,10 @@ void setup()
 	Wire.begin();
 	sht3xd.begin( 0x44 ); // I2C address: 0x44 or 0x45
 
+	ht30SerialNumber = sht3xd.readSerialNumber();
+
 	Serial.print( "Serial #" );
-	Serial.println( sht3xd.readSerialNumber() );
+	Serial.println( ht30SerialNumber );
 	if( sht3xd.periodicStart( SHT3XD_REPEATABILITY_HIGH, SHT3XD_FREQUENCY_10HZ ) != SHT3XD_NO_ERROR )
 		Serial.println( "[ERROR] Cannot start periodic mode" );
 
@@ -168,7 +151,7 @@ void setup()
 
 	tft.setSwapBytes( true );
 	tft.pushImage( 0, 0,	240, 135, daughters );
-	espDelay( 5000 );
+	delay( 5000 );
 	tft.setRotation( 0 );
 	tft.fillScreen( TFT_BLACK );
 	tft.setTextDatum( MC_DATUM );
@@ -224,11 +207,8 @@ void loop()
 {
 	loopCount++;
 
-	String voltage = showVoltage();
-
-	printResult( "Periodic Mode", sht3xd.periodicFetchData(), voltage );
-	// Sleep the CPU for 5 seconds.
-	espDelay( 5000 );
+	float voltage = getVoltage();
+	String voltageString = "Voltage: " + String( voltage ) + "V";
 
 	Serial.println();
 	// Check the mqttClient connection state.
@@ -239,23 +219,32 @@ void loop()
 	}
 	mqttClient.loop();
 
-	// Print the results to the onboard TFT screen.
-	printResult( "Periodic Mode", sht3xd.periodicFetchData(), voltage );
-
 	// Get temperature and relative humidity from the SHT30 library.
-	// Temperature is always a floating point in Centigrade units. Relative humidity is a 32 bit integer in Pascal units.
-	float temperature = sht3xd.periodicFetchData().t;	 				// Get temperature.
-	float humidity = sht3xd.periodicFetchData().rh;			 				// Get relative humidity.
+	SHT31D result = sht3xd.periodicFetchData();
+	if( result.error == SHT3XD_NO_ERROR )
+	{
+		// Temperature is always a floating point in Centigrade units. Relative humidity is a 32 bit integer in Pascal units.
+		float temperature = result.t;	 				// Get temperature.
+		float humidity = result.rh;			 		// Get relative humidity.
 
-	// Prepare a String to hold the JSON.
-	char mqttString[256];
-	// Write the readings to the String in JSON format.
-	snprintf( mqttString, 256, "{\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"tempC\": %.1f,\n\t\"humidity\": %.1f\n}", macAddress, clientAddress, temperature, humidity );
-	// Publish the JSON to the MQTT broker.
-	mqttClient.publish( mqttTopic, mqttString );
-	// Print the JSON to the Serial port.
-	Serial.println( mqttString );
+		// Print the results to the onboard TFT screen.
+		printResult( "Periodic Mode", temperature, humidity, voltageString );
+
+		// Prepare a String to hold the JSON.
+		char mqttString[256];
+		// Write the readings to the String in JSON format.
+		snprintf( mqttString, 256, "{\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"tempC\": %.1f,\n\t\"humidity\": %.1f,\n\t\"voltage\": %.2f\n}", macAddress, clientAddress, temperature, humidity, voltage );
+		// Publish the JSON to the MQTT broker.
+		mqttClient.publish( mqttTopic, mqttString );
+		// Print the JSON to the Serial port.
+		Serial.println( mqttString );
+	}
+	else
+	{
+		Serial.println( "\nUnable to read from the sensor!\n" );
+	}
+
 
 	Serial.println( "Pausing for 60 seconds..." );
-	espDelay( 60000 );	// Wait for 60 seconds.
+	delay( 60000 );	// Wait for 60 seconds.
 } // End of loop() function.
