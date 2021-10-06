@@ -26,21 +26,17 @@
 //const char* mqttBroker = "yourBrokerAddress";	// Typically kept in "privateInfo.h".
 //const int mqttPort = 1883;							// Typically kept in "privateInfo.h".
 const char* mqttTopic = "ajhWeather";
-char clientAddress[16];
+char ipAddress[16];
 char macAddress[18];
-// Provo Airport: https://forecast.weather.gov/data/obhistory/KPVU.html
-// ThingSpeak variables
-unsigned long myChannelNumber = 1;
-//const char* myWriteAPIKey = "yourWriteKey";	// Typically kept in "privateInfo.h".
-String ht30SerialNumber = "";
+String ht30SerialNumber = "";					// Typically something like 927334746
+int loopCount = 0;
+int vref = 1100;
 
 // Create class objects.
-WiFiClient espClient;
+WiFiClient espClient;							// Network client.
 PubSubClient mqttClient( espClient );		// MQTT client.
 TFT_eSPI tft = TFT_eSPI( 135, 240 );		// Graphics library.
 ClosedCube_SHT31D sht3xd;						// SH30 library.
-int loopCount = 0;
-int vref = 1100;
 
 
 // This function puts the ESP into shallow sleep, which saves power compared to the traditional delay().
@@ -49,26 +45,32 @@ void espDelay( int ms )
 	esp_sleep_enable_timer_wakeup( ms * 1000 );
 	esp_sleep_pd_config( ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_ON );
 	esp_light_sleep_start();
-}
+} // End of espDelay() function.
 
 
 float getVoltage()
 {
 	uint16_t adcValue = analogRead( ADC_PIN );
 	return ( ( float ) adcValue / 4095.0 ) * 2.0 * 3.3 * ( vref / 1000.0 );
-} // End of getVoltage()
+} // End of getVoltage() function.
 
 
-void printResult( String text, float temperature, float humidity, String voltage )
+// printResults will print very specific values to very specific locations.
+// The first thing it does is black-out the screen, so previous information on screen is lost.
+void printResult( float temperature, float humidity, float voltage )
 {
+	// Black-out the screen to ensure no stale data interferes.
 	tft.fillScreen( TFT_BLACK );
+	// Set the middle center (MC) as the reference point.
 	tft.setTextDatum( MC_DATUM );
+
+	String voltageString = "Voltage: " + String( voltage ) + "V";
 
 	// DrawString cannot print a float, so it needs to be inserted into a String.
 	String tempBuffer;
 	tempBuffer += F( "Temp : " );
 	tempBuffer += String( temperature );
-	// This display does not handle the degree symbol well.
+	// This font does not handle the degree symbol.
 	tempBuffer += F( "°C");
 
 	String humidityBuffer;
@@ -76,27 +78,41 @@ void printResult( String text, float temperature, float humidity, String voltage
 	humidityBuffer += String( humidity );
 	humidityBuffer += F( "%");
 
+	// Draw this line 48 pixels above middle.
+	tft.drawString( macAddress,  tft.width() / 2, tft.height() / 2 - 48 );
+
+	// Draw this line 32 pixels above middle.
+	tft.drawString( ipAddress,  tft.width() / 2, tft.height() / 2 - 32 );
+
 	// Draw this line 16 pixels above middle.
-	tft.drawString( tempBuffer,  tft.width() / 2, tft.height() / 2 - 16 );
+	tft.drawString( "S/N : " + String ( ht30SerialNumber ),	tft.width() / 2, tft.height() / 2 - 16 );
 
 	// Draw this line centered vertically and horizontally.
-	tft.drawString( humidityBuffer,  tft.width() / 2, tft.height() / 2 );
+	tft.drawString( tempBuffer,  tft.width() / 2, tft.height() / 2 );
 
 	// Draw this line 16 pixels below middle.
-	tft.drawString( voltage,	tft.width() / 2, tft.height() / 2 + 16 );
-} // End of printResult()
+	tft.drawString( humidityBuffer,  tft.width() / 2, tft.height() / 2 + 16 );
+
+	// Draw this line 32 pixels below middle.
+	tft.drawString( voltageString,	tft.width() / 2, tft.height() / 2 + 32 );
+
+	String min = " minutes";
+	if( loopCount < 2 )
+		min = " minute";
+	// Draw this line 48 pixels below middle.
+	tft.drawString( String ( loopCount ) + min, tft.width() / 2, tft.height() / 2 + 48 );
+} // End of printResult() function.
 
 
-/**
- * mqttConnect() will attempt to (re)connect the MQTT client.
- */
+// mqttConnect() will attempt to (re)connect the MQTT client.
 void mqttConnect()
 {
 	// Loop until MQTT has connected.
 	while( !mqttClient.connected() )
 	{
 		Serial.print( "Attempting MQTT connection..." );
-		if( mqttClient.connect( "ESP32 Client" ) ) // Attempt to mqttConnect using the designated clientID.
+		// Connect to the broker using the MAC address for a clientID.
+		if( mqttClient.connect( macAddress ) )
 		{
 			Serial.println( "connected!" );
 		}
@@ -109,7 +125,6 @@ void mqttConnect()
 			delay( 2000 );
 		}
 	}
-	Serial.println( "MQTT is connected!\n" );
 } // End of mqttConnect() function.
 
 
@@ -123,15 +138,13 @@ void setup()
 	delay( 10 );
 	Serial.println( '\n' );
 	Wire.begin();
-	sht3xd.begin( 0x44 ); // I2C address: 0x44 or 0x45
 
-	ht30SerialNumber = sht3xd.readSerialNumber();
+	// Set the ipAddress char array to a default value.
+	snprintf( ipAddress, 16, "127.0.0.1" );
 
-	Serial.print( "Serial #" );
-	Serial.println( ht30SerialNumber );
-	if( sht3xd.periodicStart( SHT3XD_REPEATABILITY_HIGH, SHT3XD_FREQUENCY_10HZ ) != SHT3XD_NO_ERROR )
-		Serial.println( "[ERROR] Cannot start periodic mode" );
-
+	// Initialize the HT30 seonsor.
+	startSensor();
+	
 	/*
 	ADC_EN is the ADC detection enable port.
 	If the USB port is used for power supply, it is turned on by default.
@@ -140,25 +153,70 @@ void setup()
 	pinMode( ADC_EN, OUTPUT );
 	digitalWrite( ADC_EN, HIGH );
 
+	// Initialize the TFT screen.
+	initTFT();
+
+	// Set the MQTT client parameters.
+	mqttClient.setServer( mqttBroker, mqttPort );
+
+	// Get the MAC address and store it in macAddress.	
+	snprintf( macAddress, 18, "%s", WiFi.macAddress().c_str() );
+
+	// Black-out the screen to ensure no stale data interferes.
+	tft.fillScreen( TFT_BLACK );
+	// Set the middle center (MC) as the reference point.
+	tft.setTextDatum( MC_DATUM );
+	// Draw this line centered vertically and horizontally.
+	tft.drawString( "Connecting to WiFi...",  tft.width() / 2, tft.height() / 2 );
+
+	// Try to connect to the configured WiFi network, up to 10 times.
+	wifiConnect( 10 );
+} // End of setup() function.
+
+
+void startSensor()
+{
+	sht3xd.begin( 0x44 ); // I2C address: 0x44 or 0x45
+	ht30SerialNumber = sht3xd.readSerialNumber();
+	Serial.print( "Serial # " );
+	Serial.println( ht30SerialNumber );
+	// Start the HT30 sensor and check the return value.
+	if( sht3xd.periodicStart( SHT3XD_REPEATABILITY_HIGH, SHT3XD_FREQUENCY_10HZ ) != SHT3XD_NO_ERROR )
+		Serial.println( "[ERROR] Cannot start periodic mode" );
+} // End of startSensor() function.
+
+
+void initTFT()
+{
+	// Initialize the TFT driver.
 	tft.init();
+	// Set the orientation where the antenna is on the left and the USB port is on the right.
 	tft.setRotation( 1 );
+	// Set the orientation where the antenna is on the right and the USB port is on the left.
+	tft.setRotation( 3 );
+	// Set the background to black.
 	tft.fillScreen( TFT_BLACK );
 	tft.setTextSize( 2 );
+	// This color of green has good contrast on black.
 	tft.setTextColor( TFT_GREEN );
 	tft.setCursor( 0, 0 );
+	// Set the refernce point to middle center (MC).
 	tft.setTextDatum( MC_DATUM );
 	tft.setTextSize( 1 );
 
 	tft.setSwapBytes( true );
 	tft.pushImage( 0, 0,	240, 135, daughters );
 	delay( 5000 );
+	// Set the orientation where the antenna is up and the USB port is down.
 	tft.setRotation( 0 );
 	tft.fillScreen( TFT_BLACK );
 	tft.setTextDatum( MC_DATUM );
+} // End of initTFT() function.
 
-	// Set the MQTT client parameters.
-	mqttClient.setServer( mqttBroker, mqttPort );
 
+void wifiConnect( int attemptCount )
+{
+	
 	// Announce WiFi parameters.
 	String logString = "WiFi connecting to SSID: ";
 	logString += wifiSsid;
@@ -178,7 +236,7 @@ void setup()
      6 : WL_DISCONNECTED if module is not configured in station mode
   */
 	// Loop until WiFi has connected.
-	while( WiFi.status() != WL_CONNECTED )
+	while( WiFi.status() != WL_CONNECTED && i < attemptCount )
 	{
 		delay( 1000 );
 		Serial.println( "Waiting for a connection..." );
@@ -191,13 +249,12 @@ void setup()
 	// Print that WiFi has connected.
 	Serial.println( '\n' );
 	Serial.println( "WiFi connection established!" );
-	snprintf( macAddress, 18, "%s", WiFi.macAddress().c_str() );
 	Serial.print( "MAC address: " );
 	Serial.println( macAddress );
 	Serial.print( "IP address: " );
-	snprintf( clientAddress, 16, "%d.%d.%d.%d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3] );
-	Serial.println( clientAddress );
-} // End of setup() function.
+	snprintf( ipAddress, 16, "%d.%d.%d.%d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3] );
+	Serial.println( ipAddress );
+} // End of wifiConnect() function.
 
 
 /**
@@ -208,7 +265,6 @@ void loop()
 	loopCount++;
 
 	float voltage = getVoltage();
-	String voltageString = "Voltage: " + String( voltage ) + "V";
 
 	Serial.println();
 	// Check the mqttClient connection state.
@@ -228,12 +284,12 @@ void loop()
 		float humidity = result.rh;			 		// Get relative humidity.
 
 		// Print the results to the onboard TFT screen.
-		printResult( "Periodic Mode", temperature, humidity, voltageString );
+		printResult( temperature, humidity, voltage );
 
 		// Prepare a String to hold the JSON.
 		char mqttString[256];
 		// Write the readings to the String in JSON format.
-		snprintf( mqttString, 256, "{\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"tempC\": %.1f,\n\t\"humidity\": %.1f,\n\t\"voltage\": %.2f\n}", macAddress, clientAddress, temperature, humidity, voltage );
+		snprintf( mqttString, 256, "{\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"tempC\": %.1f,\n\t\"humidity\": %.1f,\n\t\"voltage\": %.2f\n}", macAddress, ipAddress, temperature, humidity, voltage );
 		// Publish the JSON to the MQTT broker.
 		mqttClient.publish( mqttTopic, mqttString );
 		// Print the JSON to the Serial port.
@@ -243,7 +299,6 @@ void loop()
 	{
 		Serial.println( "\nUnable to read from the sensor!\n" );
 	}
-
 
 	Serial.println( "Pausing for 60 seconds..." );
 	delay( 60000 );	// Wait for 60 seconds.
