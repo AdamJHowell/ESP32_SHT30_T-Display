@@ -31,12 +31,14 @@ char macAddress[18];
 String ht30SerialNumber = "";					// Typically something like 927334746
 int loopCount = 0;
 int vref = 1100;
+float voltage;
 
 // Create class objects.
 WiFiClient espClient;							// Network client.
 PubSubClient mqttClient( espClient );		// MQTT client.
 TFT_eSPI tft = TFT_eSPI( 135, 240 );		// Graphics library.
 ClosedCube_SHT31D sht3xd;						// SH30 library.
+SHT31D result;										// The struct which will hold sensor data.
 
 
 // This function puts the ESP into shallow sleep, which saves power compared to the traditional delay().
@@ -97,7 +99,7 @@ void printResult( float temperature, float humidity, float voltage )
 	tft.drawString( voltageString,	tft.width() / 2, tft.height() / 2 + 32 );
 
 	String min = " minutes";
-	if( loopCount < 2 )
+	if( loopCount == 1 )
 		min = " minute";
 	// Draw this line 48 pixels below middle.
 	tft.drawString( String ( loopCount ) + min, tft.width() / 2, tft.height() / 2 + 48 );
@@ -166,8 +168,16 @@ void setup()
 	tft.fillScreen( TFT_BLACK );
 	// Set the middle center (MC) as the reference point.
 	tft.setTextDatum( MC_DATUM );
-	// Draw this line centered vertically and horizontally.
-	tft.drawString( "Connecting to WiFi...",  tft.width() / 2, tft.height() / 2 );
+	
+	result = sht3xd.periodicFetchData();
+	voltage = getVoltage();
+	float temperature = result.t;	 				// Get temperature.
+	float humidity = result.rh;			 		// Get relative humidity.
+	// Print the results to the onboard TFT screen.
+	printResult( temperature, humidity, voltage );
+
+	// Draw this line centered horizontally, and near the bottom of the screen.
+	tft.drawString( "Connecting to WiFi...",  tft.width() / 2, tft.height() / 2 + 80 );
 
 	// Try to connect to the configured WiFi network, up to 10 times.
 	wifiConnect( 10 );
@@ -216,7 +226,6 @@ void initTFT()
 
 void wifiConnect( int attemptCount )
 {
-	
 	// Announce WiFi parameters.
 	String logString = "WiFi connecting to SSID: ";
 	logString += wifiSsid;
@@ -242,8 +251,13 @@ void wifiConnect( int attemptCount )
 		Serial.println( "Waiting for a connection..." );
 		Serial.print( "WiFi status: " );
 		Serial.println( WiFi.status() );
-		Serial.print( ++i );
-		Serial.println( " seconds" );
+		snprintf( ipAddress, 16, "%d.%d.%d.%d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3] );
+		logString = ++i;
+		logString += " seconds";
+		Serial.print( logString );
+		// Draw this line centered horizontally, and near the bottom of the screen.
+		tft.drawString( logString,  tft.width() / 2, tft.height() / 2 + 96 );
+
 	}
 
 	// Print that WiFi has connected.
@@ -264,7 +278,7 @@ void loop()
 {
 	loopCount++;
 
-	float voltage = getVoltage();
+	voltage = getVoltage();
 
 	Serial.println();
 	// Check the mqttClient connection state.
@@ -276,7 +290,7 @@ void loop()
 	mqttClient.loop();
 
 	// Get temperature and relative humidity from the SHT30 library.
-	SHT31D result = sht3xd.periodicFetchData();
+	result = sht3xd.periodicFetchData();
 	if( result.error == SHT3XD_NO_ERROR )
 	{
 		// Temperature is always a floating point in Centigrade units. Relative humidity is a 32 bit integer in Pascal units.
@@ -300,6 +314,9 @@ void loop()
 		Serial.println( "\nUnable to read from the sensor!\n" );
 	}
 
+	String logString = "loopCount: ";
+	logString += loopCount;
+	Serial.println( logString );
 	Serial.println( "Pausing for 60 seconds..." );
 	delay( 60000 );	// Wait for 60 seconds.
 } // End of loop() function.
