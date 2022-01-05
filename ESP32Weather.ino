@@ -1,10 +1,9 @@
 /*
- * This sketch is a branc of my PubSubWeather sketch.
+ * This sketch is a branch of my PubSubWeather sketch, modified for the TTGO T-Display ESP32.
  * This sketch will use a HT30 sensor (0x44) to show temperature and humidity.
  * The ESP-32 SDA pin is GPIO21, and SCL is GPIO22.
  */
 #include <TFT_eSPI.h>				// This header is included in https://github.com/Xinyuan-LilyGO/TTGO-T-Display
-#include <SPI.h>						// This header is added to the IDE libraries after the ESP32 is added in board manager.
 #include "WiFi.h"						// This header is added to the IDE libraries after the ESP32 is added in board manager.
 #include <Wire.h>						// This header is part of the standard library.  https://www.arduino.cc/en/reference/wire
 #include "esp_adc_cal.h"			// This header is added to the IDE libraries after the ESP32 is added in board manager.
@@ -13,7 +12,7 @@
 #include <PubSubClient.h>			// PubSub is the MQTT API.  Author: Nick O'Leary  https://github.com/knolleary/pubsubclient
 #include "privateInfo.h"			// I use this file to hide my network information from random people browsing my GitHub repo.
 
-#define ADC_EN					14  // ADC_EN is the ADC detection enable port.
+#define ADC_EN					14  	// ADC_EN is the Analog to Digital Converter detection enable port.
 #define ADC_PIN				34
 
 /**
@@ -21,11 +20,12 @@
  * Adjust the commented-out variables to match your network and broker settings.
  * The commented-out variables are stored in "privateInfo.h", which I do not upload to GitHub.
  */
-//const char* wifiSsid = "yourSSID";				// Typically kept in "privateInfo.h".
-//const char* wifiPassword = "yourPassword";		// Typically kept in "privateInfo.h".
-//const char* mqttBroker = "yourBrokerAddress";	// Typically kept in "privateInfo.h".
+//const char * wifiSsid = "yourSSID";				// Typically kept in "privateInfo.h".
+//const char * wifiPassword = "yourPassword";		// Typically kept in "privateInfo.h".
+//const char * mqttBroker = "yourBrokerAddress";	// Typically kept in "privateInfo.h".
 //const int mqttPort = 1883;							// Typically kept in "privateInfo.h".
-const char* mqttTopic = "ajhWeather";
+const char * mqttTopic = "ajhWeather";
+const char * sketchName = "ESP32Weather.ino";
 char ipAddress[16];
 char macAddress[18];
 String ht30SerialNumber = "";					// Typically something like 927334746
@@ -50,6 +50,7 @@ void espDelay( int ms )
 } // End of espDelay() function.
 
 
+// Get the voltage of the battery or the 5 volt pin of the USB connection.
 float getVoltage()
 {
 	uint16_t adcValue = analogRead( ADC_PIN );
@@ -106,49 +107,28 @@ void printResult( float temperature, float humidity, float voltage )
 } // End of printResult() function.
 
 
-// mqttConnect() will attempt to (re)connect the MQTT client.
-void mqttConnect()
-{
-	// Loop until MQTT has connected.
-	while( !mqttClient.connected() )
-	{
-		Serial.print( "Attempting MQTT connection..." );
-		// Connect to the broker using the MAC address for a clientID.
-		if( mqttClient.connect( macAddress ) )
-		{
-			Serial.println( "connected!" );
-		}
-		else
-		{
-			Serial.print( " failed, return code: " );
-			Serial.print( mqttClient.state() );
-			Serial.println( " try again in 2 seconds" );
-			// Wait 2 seconds before retrying.
-			delay( 2000 );
-		}
-	}
-} // End of mqttConnect() function.
-
-
 /**
  * The setup() function runs once when the device is booted, and then loop() takes over.
  */
 void setup()
 {
-	// Start the Serial communication to send messages to the computer.
+	// Start the Serial communication to send messages to the connected serial port.
 	Serial.begin( 115200 );
 	delay( 10 );
 	Serial.println( '\n' );
+	Serial.print( sketchName );
+	Serial.println( " is beginning its setup()." );
 	Wire.begin();
 
 	// Set the ipAddress char array to a default value.
 	snprintf( ipAddress, 16, "127.0.0.1" );
 
+	Serial.println( "Initializing the HT30 sensor..." );
 	// Initialize the HT30 seonsor.
 	startSensor();
-	
+
 	/*
-	ADC_EN is the ADC detection enable port.
+	ADC_EN is the Analog to Digital Converter detection enable port.
 	If the USB port is used for power supply, it is turned on by default.
 	If it is powered by battery, it needs to be set to high level.
 	*/
@@ -161,14 +141,14 @@ void setup()
 	// Set the MQTT client parameters.
 	mqttClient.setServer( mqttBroker, mqttPort );
 
-	// Get the MAC address and store it in macAddress.	
+	// Get the MAC address and store it in macAddress.
 	snprintf( macAddress, 18, "%s", WiFi.macAddress().c_str() );
 
 	// Black-out the screen to ensure no stale data interferes.
 	tft.fillScreen( TFT_BLACK );
 	// Set the middle center (MC) as the reference point.
 	tft.setTextDatum( MC_DATUM );
-	
+
 	result = sht3xd.periodicFetchData();
 	voltage = getVoltage();
 	float temperature = result.t;	 				// Get temperature.
@@ -224,7 +204,7 @@ void initTFT()
 } // End of initTFT() function.
 
 
-void wifiConnect( int attemptCount )
+void wifiConnect( int maxAttempts )
 {
 	// Announce WiFi parameters.
 	String logString = "WiFi connecting to SSID: ";
@@ -245,20 +225,21 @@ void wifiConnect( int attemptCount )
      6 : WL_DISCONNECTED if module is not configured in station mode
   */
 	// Loop until WiFi has connected.
-	while( WiFi.status() != WL_CONNECTED && i < attemptCount )
+	while( WiFi.status() != WL_CONNECTED && i < maxAttempts )
 	{
 		delay( 1000 );
 		Serial.println( "Waiting for a connection..." );
 		Serial.print( "WiFi status: " );
 		Serial.println( WiFi.status() );
-		snprintf( ipAddress, 16, "%d.%d.%d.%d", WiFi.localIP()[0], WiFi.localIP()[1], WiFi.localIP()[2], WiFi.localIP()[3] );
 		logString = ++i;
 		logString += " seconds";
-		Serial.print( logString );
+		Serial.println( logString );
 		// Draw this line centered horizontally, and near the bottom of the screen.
 		tft.drawString( logString,  tft.width() / 2, tft.height() / 2 + 96 );
-
 	}
+
+	WiFi.setAutoReconnect( true );
+	WiFi.persistent( true );
 
 	// Print that WiFi has connected.
 	Serial.println( '\n' );
@@ -271,6 +252,41 @@ void wifiConnect( int attemptCount )
 } // End of wifiConnect() function.
 
 
+// mqttConnect() will attempt to (re)connect the MQTT client.
+void mqttConnect( int maxAttempts )
+{
+	int i = 0;
+	// Loop until MQTT has connected.
+	while( !mqttClient.connected() && i < maxAttempts )
+	{
+		Serial.print( "Attempting MQTT connection..." );
+		// Connect to the broker using the MAC address for a clientID.  This guarantees that the clientID is unique.
+		if( mqttClient.connect( macAddress ) )
+		{
+			Serial.println( "connected!" );
+		}
+		else
+		{
+			Serial.print( " failed, return code: " );
+			Serial.print( mqttClient.state() );
+			Serial.println( " try again in 5 seconds" );
+
+			String logString = "MQTT return code ";
+			logString += mqttClient.state();
+			logString += ", retrying MQTT connection in 5 seconds...";
+			// Draw this line 64 pixels below middle.
+			tft.drawString( String ( i ) + logString, tft.width() / 2, tft.height() / 2 + 64 );
+			// Draw this line 80 pixels below middle.
+			tft.drawString( "Attempt " + String ( i ) + " of " + maxAttempts, tft.width() / 2, tft.height() / 2 + 80 );
+
+			// Wait 5 seconds before retrying.
+			delay( 5000 );
+		}
+		i++;
+	}
+} // End of mqttConnect() function.
+
+
 /**
  * The loop() function begins after setup(), and repeats as long as the unit is powered.
  */
@@ -280,12 +296,16 @@ void loop()
 
 	voltage = getVoltage();
 
-	Serial.println();
-	// Check the mqttClient connection state.
+	Serial.println( sketchName );
+
+	// Reconnect to WiFi if necessary.
+	if( WiFi.status() != WL_CONNECTED )
+		wifiConnect( 10 );
+	// Reconnect to the MQTT broker if necessary.
 	if( !mqttClient.connected() )
 	{
 		// Reconnect to the MQTT broker.
-		mqttConnect();
+		mqttConnect( 10 );
 	}
 	mqttClient.loop();
 
