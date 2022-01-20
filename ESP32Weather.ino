@@ -25,7 +25,7 @@
 //const char * mqttBroker = "yourBrokerAddress";	// Typically kept in "privateInfo.h".
 //const int mqttPort = 1883;							// Typically kept in "privateInfo.h".
 const char * mqttTopic = "ajhWeather";
-const String sketchName = "ESP32Weather.ino";
+const String sketchName = "ESP32Weather(LILLYGO).ino";
 char ipAddress[16];
 char macAddress[18];
 String ht30SerialNumber = "";					// Typically something like 927334746
