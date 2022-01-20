@@ -25,7 +25,7 @@
 //const char * mqttBroker = "yourBrokerAddress";	// Typically kept in "privateInfo.h".
 //const int mqttPort = 1883;							// Typically kept in "privateInfo.h".
 const char * mqttTopic = "ajhWeather";
-const char * sketchName = "ESP32Weather.ino";
+const String sketchName = "ESP32Weather.ino";
 char ipAddress[16];
 char macAddress[18];
 String ht30SerialNumber = "";					// Typically something like 927334746
@@ -323,7 +323,7 @@ void loop()
 		// Prepare a String to hold the JSON.
 		char mqttString[256];
 		// Write the readings to the String in JSON format.
-		snprintf( mqttString, 256, "{\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"tempC\": %.1f,\n\t\"humidity\": %.1f,\n\t\"voltage\": %.2f\n}", macAddress, ipAddress, temperature, humidity, voltage );
+		snprintf( mqttString, 256, "{\n\t\"sketch\": \"%s\",\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"serial\": \"%s\",\n\t\"temp1C\": %.1f,\n\t\"humidity1\": %.1f,\n\t\"voltage1\": %.2f\n}", sketchName, macAddress, ipAddress, ht30SerialNumber, temperature, humidity, voltage );
 		// Publish the JSON to the MQTT broker.
 		mqttClient.publish( mqttTopic, mqttString );
 		// Print the JSON to the Serial port.
