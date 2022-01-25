@@ -307,6 +307,7 @@ void loop()
 		// Reconnect to the MQTT broker.
 		mqttConnect( 10 );
 	}
+	// The loop() function facilitates the receiving of messages and maintains the connection to the broker.
 	mqttClient.loop();
 
 	// Get temperature and relative humidity from the SHT30 library.
