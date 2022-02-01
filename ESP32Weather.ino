@@ -25,7 +25,8 @@
 //const char * mqttBroker = "yourBrokerAddress";	// Typically kept in "privateInfo.h".
 //const int mqttPort = 1883;							// Typically kept in "privateInfo.h".
 const char * mqttTopic = "ajhWeather";
-const String sketchName = "ESP32Weather(LILLYGO).ino";
+const char * sketchName = "ESP32Weather";
+const char * notes = "Lillygo TFT with HT30";
 char ipAddress[16];
 char macAddress[18];
 String ht30SerialNumber = "";					// Typically something like 927334746
@@ -74,7 +75,7 @@ void printResult( float temperature, float humidity, float voltage )
 	tempBuffer += F( "Temp : " );
 	tempBuffer += String( temperature );
 	// This font does not handle the degree symbol.
-	tempBuffer += F( "°C");
+	tempBuffer += F( "*C");
 
 	String humidityBuffer;
 	humidityBuffer += F( "Humidity : " );
@@ -114,7 +115,8 @@ void setup()
 {
 	// Start the Serial communication to send messages to the connected serial port.
 	Serial.begin( 115200 );
-	delay( 10 );
+	while ( !Serial )
+		delay( 100 );
 	Serial.println( '\n' );
 	Serial.print( sketchName );
 	Serial.println( " is beginning its setup()." );
@@ -293,9 +295,7 @@ void mqttConnect( int maxAttempts )
 void loop()
 {
 	loopCount++;
-
 	voltage = getVoltage();
-
 	Serial.println( sketchName );
 
 	// Reconnect to WiFi if necessary.
@@ -324,7 +324,7 @@ void loop()
 		// Prepare a String to hold the JSON.
 		char mqttString[256];
 		// Write the readings to the String in JSON format.
-		snprintf( mqttString, 256, "{\n\t\"sketch\": \"%s\",\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"serial\": \"%s\",\n\t\"temp1C\": %.1f,\n\t\"humidity1\": %.1f,\n\t\"voltage1\": %.2f\n}", sketchName, macAddress, ipAddress, ht30SerialNumber, temperature, humidity, voltage );
+		snprintf( mqttString, 256, "{\n\t\"sketch\": \"%s\",\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"serial\": \"%s\",\n\t\"tempC\": %.2f,\n\t\"humidity\": %.1f,\n\t\"voltage\": %.2f,\n\t\"notes\": \"%s\"\n}", sketchName, macAddress, ipAddress, ht30SerialNumber, temperature, humidity, voltage, notes );
 		// Publish the JSON to the MQTT broker.
 		mqttClient.publish( mqttTopic, mqttString );
 		// Print the JSON to the Serial port.
