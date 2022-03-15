@@ -2,6 +2,8 @@
  * This sketch is a branch of my PubSubWeather sketch, modified for the TTGO T-Display ESP32.
  * This sketch will use a HT30 sensor (0x44) to show temperature and humidity.
  * The ESP-32 SDA pin is GPIO21, and SCL is GPIO22.
+ * @copyright   Copyright © 2022 Adam Howell
+ * @licence     The MIT License (MIT)
  */
 #include <TFT_eSPI.h>				// This header is included in https://github.com/Xinyuan-LilyGO/TTGO-T-Display
 #include "WiFi.h"						// This header is added to the IDE libraries after the ESP32 is added in board manager.
@@ -24,7 +26,7 @@
 //const char * wifiPassword = "yourPassword";		// Typically kept in "privateInfo.h".
 //const char * mqttBroker = "yourBrokerAddress";	// Typically kept in "privateInfo.h".
 //const int mqttPort = 1883;							// Typically kept in "privateInfo.h".
-const char * mqttTopic = "ajhWeather";
+const char * mqttTopic = "espWeather";
 const char * sketchName = "ESP32Weather";
 const char * notes = "Lillygo TFT with HT30";
 char ipAddress[16];
@@ -120,6 +122,7 @@ void setup()
 	Serial.println( '\n' );
 	Serial.print( sketchName );
 	Serial.println( " is beginning its setup()." );
+	Serial.println( __FILE__ );
 	Wire.begin();
 
 	// Set the ipAddress char array to a default value.
