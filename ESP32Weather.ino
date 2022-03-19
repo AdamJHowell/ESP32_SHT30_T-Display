@@ -117,8 +117,8 @@ void setup()
 {
 	// Start the Serial communication to send messages to the connected serial port.
 	Serial.begin( 115200 );
-	while ( !Serial )
-		delay( 100 );
+	if( !Serial )
+		delay( 1000 );
 	Serial.println( '\n' );
 	Serial.print( sketchName );
 	Serial.println( " is beginning its setup()." );
