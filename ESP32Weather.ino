@@ -13,6 +13,7 @@
 #include "ClosedCube_SHT31D.h"	// This header is used to read from the HT30 sensor.  https://github.com/closedcube/ClosedCube_SHT31D_Arduino
 #include <PubSubClient.h>			// PubSub is the MQTT API.  Author: Nick O'Leary  https://github.com/knolleary/pubsubclient
 #include "privateInfo.h"			// I use this file to hide my network information from random people browsing my GitHub repo.
+#include <ArduinoJson.h>			// https://arduinojson.org/
 
 #define ADC_EN					14  	// ADC_EN is the Analog to Digital Converter detection enable port.
 #define ADC_PIN				34
@@ -22,19 +23,23 @@
  * Adjust the commented-out variables to match your network and broker settings.
  * The commented-out variables are stored in "privateInfo.h", which I do not upload to GitHub.
  */
-//const char * wifiSsid = "yourSSID";				// Typically kept in "privateInfo.h".
+//const char * wifiSsid = "yourSSID";					// Typically kept in "privateInfo.h".
 //const char * wifiPassword = "yourPassword";		// Typically kept in "privateInfo.h".
 //const char * mqttBroker = "yourBrokerAddress";	// Typically kept in "privateInfo.h".
-//const int mqttPort = 1883;							// Typically kept in "privateInfo.h".
-const char * mqttTopic = "espWeather";
+//const int mqttPort = 1883;								// Typically kept in "privateInfo.h".
+const char * mqttTopic = "espWeather";					// This is the topic we publish to.
+const char* espControlTopic = "espControl";			// This is a topic we subscribe to, to get updates.  Updates may change publishDelay, seaLevelPressure, or request an immediate poll of the sensors.
 const char * sketchName = "ESP32Weather";
 const char * notes = "Lillygo TFT with HT30";
-char ipAddress[16];
-char macAddress[18];
-String ht30SerialNumber = "";					// Typically something like 927334746
-int loopCount = 0;
-int vref = 1100;
-float voltage;
+
+char ipAddress[16];											// Holds the IP address.
+char macAddress[18];											// Holds the MAC address.
+String ht30SerialNumber = "";								// Typically something like 927334746.
+unsigned int loopCount = 0;								// This is a counter for how many loops have happened since power-on (or overflow).
+unsigned long publishDelay = 60000;						// This is the loop delay in miliseconds.
+unsigned long lastPublish = 0;							// This is used to determine the time since last MQTT publish.
+int vref = 1100;												// The number is used to tune for variances in the ADC.
+float voltage;													// This holds the calculated voltage.
 
 // Create class objects.
 WiFiClient espClient;							// Network client.
@@ -42,6 +47,70 @@ PubSubClient mqttClient( espClient );		// MQTT client.
 TFT_eSPI tft = TFT_eSPI( 135, 240 );		// Graphics library.
 ClosedCube_SHT31D sht3xd;						// SH30 library.
 SHT31D result;										// The struct which will hold sensor data.
+
+
+void onReceiveCallback( char* topic, byte* payload, unsigned int length )
+{
+	char str[length + 1];
+	Serial.print( "Message arrived [" );
+	Serial.print( topic );
+	Serial.print( "] " );
+	int i=0;
+	for( i = 0; i < length; i++ ) 
+	{
+		Serial.print( ( char ) payload[i] );
+		str[i] = ( char )payload[i];
+	}
+	Serial.println();
+	str[i] = 0; // Null termination
+	StaticJsonDocument <256> doc;
+	deserializeJson( doc, str );
+
+	// The command can be: publishTelemetry, changeTelemetryInterval, changeSeaLevelPressure, or publishStatus.
+	const char* command = doc["command"];
+	if( strcmp( command, "publishTelemetry") == 0 )
+	{
+		Serial.println( "Reading and publishing sensor values." );
+		// Poll the sensor and immediately publish the readings.
+		result = readTelemetry();
+		if( result.error == SHT3XD_NO_ERROR )
+		{
+			publishTelemetry( result );
+		}
+		Serial.println( "Readings have been published." );
+	}
+	else if( strcmp( command, "changeTelemetryInterval") == 0 )
+	{
+		Serial.println( "Changing the publish interval." );
+		unsigned long tempValue = doc["value"];
+		// Only update the value if it is greater than 4 seconds.  This prevents a seconds vs. milliseconds mixup.
+		if( tempValue > 4000 )
+			publishDelay = tempValue;
+		Serial.print( "MQTT publish interval has been updated to " );
+		Serial.println( publishDelay );
+		lastPublish = 0;
+	}
+	else if( strcmp( command, "changeSeaLevelPressure") == 0 )
+	{
+		Serial.println( "Sea-level pressure is not implemented on the SHT series of sensors." );
+	}
+	else if( strcmp( command, "publishStatus") == 0 )
+	{
+		Serial.println( "publishStatus is not yet implemented." );
+	}
+	else if( strcmp( command, "pollSensor") == 0 )
+	{
+		Serial.println( "Polling the sensor and updating the display." );
+		result = sht3xd.periodicFetchData();
+		// Print the results to the onboard TFT screen.
+		printResult( result.t, result.rh, getVoltage(), WiFi.RSSI() );
+	}
+	else
+	{
+		Serial.print( "Unknown command: " );
+		Serial.println( command );
+	}
+} // End of onReceiveCallback() function.
 
 
 // This function puts the ESP into shallow sleep, which saves power compared to the traditional delay().
@@ -63,7 +132,7 @@ float getVoltage()
 
 // printResults will print very specific values to very specific locations.
 // The first thing it does is black-out the screen, so previous information on screen is lost.
-void printResult( float temperature, float humidity, float voltage )
+void printResult( float temperature, float humidity, float voltage, long rssi )
 {
 	// Black-out the screen to ensure no stale data interferes.
 	tft.fillScreen( TFT_BLACK );
@@ -107,6 +176,10 @@ void printResult( float temperature, float humidity, float voltage )
 		min = " minute";
 	// Draw this line 48 pixels below middle.
 	tft.drawString( String ( loopCount ) + min, tft.width() / 2, tft.height() / 2 + 48 );
+
+	String dBm = "dBm";
+	// Draw this line 64 pixels below middle.
+	tft.drawString( String ( rssi ) + dBm, tft.width() / 2, tft.height() / 2 + 64 );
 } // End of printResult() function.
 
 
@@ -115,6 +188,7 @@ void printResult( float temperature, float humidity, float voltage )
  */
 void setup()
 {
+	delay( 500 );
 	// Start the Serial communication to send messages to the connected serial port.
 	Serial.begin( 115200 );
 	if( !Serial )
@@ -145,9 +219,12 @@ void setup()
 
 	// Set the MQTT client parameters.
 	mqttClient.setServer( mqttBroker, mqttPort );
+	mqttClient.setCallback( onReceiveCallback );				 // Assign the onReceiveCallback() function to handle MQTT callbacks.
 
 	// Get the MAC address and store it in macAddress.
 	snprintf( macAddress, 18, "%s", WiFi.macAddress().c_str() );
+	Serial.print( "MAC address: " );
+	Serial.println( macAddress );
 
 	// Black-out the screen to ensure no stale data interferes.
 	tft.fillScreen( TFT_BLACK );
@@ -155,17 +232,22 @@ void setup()
 	tft.setTextDatum( MC_DATUM );
 
 	result = sht3xd.periodicFetchData();
-	voltage = getVoltage();
-	float temperature = result.t;	 				// Get temperature.
-	float humidity = result.rh;			 		// Get relative humidity.
 	// Print the results to the onboard TFT screen.
-	printResult( temperature, humidity, voltage );
+	printResult( result.t, result.rh, getVoltage(), WiFi.RSSI() );
 
+	String logString = "Connecting to WiFi...";
 	// Draw this line centered horizontally, and near the bottom of the screen.
-	tft.drawString( "Connecting to WiFi...",  tft.width() / 2, tft.height() / 2 + 80 );
+	tft.drawString( logString,  tft.width() / 2, tft.height() / 2 + 96 );
 
 	// Try to connect to the configured WiFi network, up to 10 times.
 	wifiConnect( 10 );
+
+	// Print the current values.
+	result = sht3xd.periodicFetchData();
+	// Print the results to the onboard TFT screen.
+	printResult( result.t, result.rh, getVoltage(), WiFi.RSSI() );
+
+	lastPublish = 0;
 } // End of setup() function.
 
 
@@ -220,7 +302,7 @@ void wifiConnect( int maxAttempts )
 	Serial.printf( "Wi-Fi mode set to WIFI_STA %s\n", WiFi.mode( WIFI_STA ) ? "" : "Failed!" );
 	WiFi.begin( wifiSsid, wifiPassword );
 
-	int i = 0;
+	int i = 1;
 	/*
      WiFi.status() return values:
      0 : WL_IDLE_STATUS when WiFi is in process of changing between statuses
@@ -236,11 +318,8 @@ void wifiConnect( int maxAttempts )
 		Serial.println( "Waiting for a connection..." );
 		Serial.print( "WiFi status: " );
 		Serial.println( WiFi.status() );
-		logString = ++i;
-		logString += " seconds";
-		Serial.println( logString );
-		// Draw this line centered horizontally, and near the bottom of the screen.
-		tft.drawString( logString,  tft.width() / 2, tft.height() / 2 + 96 );
+		Serial.print( i++ );
+		Serial.println( " seconds" );
 	}
 
 	WiFi.setAutoReconnect( true );
@@ -269,27 +348,52 @@ void mqttConnect( int maxAttempts )
 		if( mqttClient.connect( macAddress ) )
 		{
 			Serial.println( "connected!" );
+			mqttClient.subscribe( espControlTopic );		// Subscribe to the designated MQTT topic.
 		}
 		else
 		{
 			Serial.print( " failed, return code: " );
 			Serial.print( mqttClient.state() );
 			Serial.println( " try again in 5 seconds" );
-
-			String logString = "MQTT return code ";
-			logString += mqttClient.state();
-			logString += ", retrying MQTT connection in 5 seconds...";
-			// Draw this line 64 pixels below middle.
-			tft.drawString( String ( i ) + logString, tft.width() / 2, tft.height() / 2 + 64 );
-			// Draw this line 80 pixels below middle.
-			tft.drawString( "Attempt " + String ( i ) + " of " + maxAttempts, tft.width() / 2, tft.height() / 2 + 80 );
-
 			// Wait 5 seconds before retrying.
 			delay( 5000 );
 		}
 		i++;
 	}
+	mqttClient.setBufferSize( 512 );
 } // End of mqttConnect() function.
+
+
+SHT31D readTelemetry()
+{
+	return sht3xd.periodicFetchData();
+}
+
+
+void publishTelemetry( SHT31D result )
+{
+	// Get the signal strength:
+	long rssi = WiFi.RSSI();
+	Serial.print( "WiFi RSSI: " );
+	Serial.println( rssi );
+
+	// Print the results to the onboard TFT screen.
+	printResult( result.t, result.rh, getVoltage(), rssi );
+
+	// Prepare a String to hold the JSON.
+	char mqttString[512];
+	// Write the readings to the String in JSON format.
+	snprintf( mqttString, 512, "{\n\t\"sketch\": \"%s\",\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"serial\": \"%s\",\n\t\"tempC\": %.2f,\n\t\"humidity\": %.1f,\n\t\"voltage\": %.2f,\n\t\"rssi\": %ld,\n\t\"uptime\": %d,\n\t\"notes\": \"%s\"\n}", sketchName, macAddress, ipAddress, ht30SerialNumber, result.t, result.rh, voltage, rssi, loopCount, notes );
+	// Publish the JSON to the MQTT broker.
+	bool success = mqttClient.publish( mqttTopic, mqttString, false );
+	if( success )
+		Serial.println( "Successfully published this to the broker:" );
+	else
+		Serial.println( "MQTT publish failed!  Attempted to publish this to the broker:" );
+	// Print the JSON to the Serial port.
+	Serial.println( mqttString );
+	lastPublish = millis();
+}
 
 
 /**
@@ -297,50 +401,63 @@ void mqttConnect( int maxAttempts )
  */
 void loop()
 {
-	loopCount++;
-	voltage = getVoltage();
-	Serial.println( sketchName );
-
 	// Reconnect to WiFi if necessary.
 	if( WiFi.status() != WL_CONNECTED )
+	{
+		String logString = "Connecting to WiFi...";
+		// Draw this line centered horizontally, and near the bottom of the screen.
+		tft.drawString( logString,  tft.width() / 2, tft.height() / 2 + 96 );
 		wifiConnect( 10 );
+		// Clear the line.
+		tft.drawString( "                     ",  tft.width() / 2, tft.height() / 2 + 96 );
+	}
 	// Reconnect to the MQTT broker if necessary.
 	if( !mqttClient.connected() )
 	{
-		// Reconnect to the MQTT broker.
+		String logString = "Connecting MQTT...";
+		// Draw this line centered horizontally, and near the bottom of the screen.
+		tft.drawString( logString,  tft.width() / 2, tft.height() / 2 + 96 );
 		mqttConnect( 10 );
+		// Clear the line.
+		tft.drawString( "                                ",  tft.width() / 2, tft.height() / 2 + 96 );
 	}
 	// The loop() function facilitates the receiving of messages and maintains the connection to the broker.
 	mqttClient.loop();
 
-	// Get temperature and relative humidity from the SHT30 library.
-	result = sht3xd.periodicFetchData();
-	if( result.error == SHT3XD_NO_ERROR )
+	// ToDo: Move all this into a function, and call it from setup() and from loop().
+	unsigned long time = millis();
+	// When time is less than publishDelay, subtracting publishDelay from time causes an overlow which results in a very large number.
+	if( ( time > publishDelay ) && ( time - publishDelay ) > lastPublish )
 	{
-		// Temperature is always a floating point in Centigrade units. Relative humidity is a 32 bit integer in Pascal units.
-		float temperature = result.t;	 				// Get temperature.
-		float humidity = result.rh;			 		// Get relative humidity.
+		loopCount++;
+		voltage = getVoltage();
+		Serial.println( sketchName );
+		Serial.print( "Connected to broker at \"" );
+		Serial.print( mqttBroker );
+		Serial.print( ":" );
+		Serial.print( mqttPort );
+		Serial.println( "\"" );
+		Serial.print( "Listening for control messages on topic \"" );
+		Serial.print( espControlTopic );
+		Serial.println( "\"." );
 
-		// Print the results to the onboard TFT screen.
-		printResult( temperature, humidity, voltage );
-
-		// Prepare a String to hold the JSON.
-		char mqttString[256];
-		// Write the readings to the String in JSON format.
-		snprintf( mqttString, 256, "{\n\t\"sketch\": \"%s\",\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"serial\": \"%s\",\n\t\"tempC\": %.2f,\n\t\"humidity\": %.1f,\n\t\"voltage\": %.2f,\n\t\"notes\": \"%s\"\n}", sketchName, macAddress, ipAddress, ht30SerialNumber, temperature, humidity, voltage, notes );
-		// Publish the JSON to the MQTT broker.
-		mqttClient.publish( mqttTopic, mqttString );
-		// Print the JSON to the Serial port.
-		Serial.println( mqttString );
+		// Get temperature and relative humidity from the SHT30 library.
+		result = readTelemetry();
+		if( result.error == SHT3XD_NO_ERROR )
+		{
+			String logString = "Publishing telemetry...";
+			// Draw this line centered horizontally, and near the bottom of the screen.
+			tft.drawString( logString,  tft.width() / 2, tft.height() / 2 + 96 );
+			publishTelemetry( result );
+		}
+		else
+		{
+			Serial.println( "\nUnable to read from the sensor!\n" );
+		}
+		// Clear the line.
+		tft.drawString( "                       ",  tft.width() / 2, tft.height() / 2 + 96 );
+	  	Serial.print( "Next publish in " );
+		Serial.print( publishDelay / 1000 );
+		Serial.println( " seconds.\n" );
 	}
-	else
-	{
-		Serial.println( "\nUnable to read from the sensor!\n" );
-	}
-
-	String logString = "loopCount: ";
-	logString += loopCount;
-	Serial.println( logString );
-	Serial.println( "Pausing for 60 seconds..." );
-	delay( 60000 );	// Wait for 60 seconds.
 } // End of loop() function.
