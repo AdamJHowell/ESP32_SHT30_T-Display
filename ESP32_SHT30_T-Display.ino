@@ -1,6 +1,7 @@
 /*
  * This sketch is a branch of my PubSubWeather sketch, modified for the TTGO T-Display ESP32.
- * This sketch will use a HT30 sensor (0x44) to show temperature and humidity.
+ * This sketch will use a GT-HT30 sensor (SHT-30 compatible) on address 0x44 to show temperature and humidity.
+ * https://usa.banggood.com/GT-HT30-Module-SHT30-High-Precision-Digital-Temperature-and-Humidity-Measurement-Sensor-Module-IIC-I2C-Interface-p-1879767.html
  * The ESP-32 SDA pin is GPIO21, and SCL is GPIO22.
  * @copyright   Copyright © 2022 Adam Howell
  * @licence     The MIT License (MIT)
@@ -9,7 +10,7 @@
 #include "WiFi.h"						// This header is added to the IDE libraries after the ESP32 is added in board manager.
 #include <Wire.h>						// This header is part of the standard library.  https://www.arduino.cc/en/reference/wire
 #include "esp_adc_cal.h"			// This header is added to the IDE libraries after the ESP32 is added in board manager.
-#include "bmp.h"						// Created at http://www.rinkydinkelectronics.com/t_imageconverter565.php
+#include "daughters.h"				// Created at http://www.rinkydinkelectronics.com/t_imageconverter565.php
 #include "ClosedCube_SHT31D.h"	// This header is used to read from the HT30 sensor.  https://github.com/closedcube/ClosedCube_SHT31D_Arduino
 #include <PubSubClient.h>			// PubSub is the MQTT API.  Author: Nick O'Leary  https://github.com/knolleary/pubsubclient
 #include "privateInfo.h"			// I use this file to hide my network information from random people browsing my GitHub repo.
@@ -56,7 +57,7 @@ void onReceiveCallback( char* topic, byte* payload, unsigned int length )
 	Serial.print( topic );
 	Serial.print( "] " );
 	int i=0;
-	for( i = 0; i < length; i++ ) 
+	for( i = 0; i < length; i++ )
 	{
 		Serial.print( ( char ) payload[i] );
 		str[i] = ( char )payload[i];
