@@ -31,19 +31,52 @@
 //const char * wifiPassword = "yourPassword";		// Typically kept in "privateInfo.h".
 //const char * mqttBroker = "yourBrokerAddress";	// Typically kept in "privateInfo.h".
 //const int mqttPort = 1883;								// Typically kept in "privateInfo.h".
-const char * mqttTopic = "espWeather";					// This is the topic we publish to.
-const char* espControlTopic = "espControl";			// This is a topic we subscribe to, to get updates.  Updates may change publishDelay, seaLevelPressure, or request an immediate poll of the sensors.
-const char * sketchName = "ESP32Weather";
-const char * notes = "Lillygo TFT with HT30";
 
-char ipAddress[16];											// Holds the IP address.
-char macAddress[18];											// Holds the MAC address.
-String ht30SerialNumber = "";								// Typically something like 927334746.
-unsigned int loopCount = 0;								// This is a counter for how many loops have happened since power-on (or overflow).
-unsigned long publishDelay = 60000;						// This is the loop delay in miliseconds.
-unsigned long lastPublish = 0;							// This is used to determine the time since last MQTT publish.
-int vref = 1100;												// The number is used to tune for variances in the ADC.
-float voltage;													// This holds the calculated voltage.
+/*
+ * Declare network variables.
+ * Adjust the commented-out variables to match your network and broker settings.
+ * The commented-out variables are stored in "privateInfo.h", which I do not upload to GitHub.
+ */
+// const char * wifiSsidArray[4] = { "Network1", "Network2", "Network3", "Syrinx" };			// Typically declared in "privateInfo.h".
+// const char * wifiPassArray[4] = { "Password1", "Password2", "Password3", "By-Tor" };		// Typically declared in "privateInfo.h".
+// const char * mqttBrokerArray[4] = { "Broker1", "Broker2", "Broker3", "192.168.0.2" };		// Typically declared in "privateInfo.h".
+// int const mqttPortArray[4] = { 1883, 1883, 1883, 2112 };												// Typically declared in "privateInfo.h".
+
+const char * hostName = "T-Display_ESP32_SHT40_OTA";										// The hostname used for OTA access.
+const char * notes = "Lillygo TFT with HT30 and OTA";										// Notes sent in the bulk publish.
+const char * espControlTopic = "espControl";													// This is a topic we subscribe to, to get updates.
+const char * commandTopic = "masterBedroom/tDisplay/command";							// The topic used to subscribe to update the configuration.  Commands: publishTelemetry, changeTelemetryInterval, publishStatus.
+const char * sketchTopic = "masterBedroom/tDisplay/sketch";								// The topic used to publish the sketch name.
+const char * macTopic = "masterBedroom/tDisplay/mac";										// The topic used to publish the MAC address.
+const char * ipTopic = "masterBedroom/tDisplay/ip";										// The topic used to publish the IP address.
+const char * rssiTopic = "masterBedroom/tDisplay/rssi";									// The topic used to publish the WiFi Received Signal Strength Indicator.
+const char * publishCountTopic = "masterBedroom/tDisplay/publishCount";				// The topic used to publish the loop count.
+const char * notesTopic = "masterBedroom/tDisplay/notes";								// The topic used to publish notes relevant to this project.
+const char * tempCTopic = "masterBedroom/tDisplay/sht40/tempC";						// The topic used to publish the temperature in Celsius.
+const char * tempFTopic = "masterBedroom/tDisplay/sht40/tempF";						// The topic used to publish the temperature in Fahrenheit.
+const char * humidityTopic = "masterBedroom/tDisplay/sht40/humidity";				// The topic used to publish the humidity.
+const char * mqttStatsTopic = "espStats";														// The topic this device will publish to upon connection to the broker.
+const char * mqttTopic = "espWeather";															// The topic used to publish a single JSON message containing all data.
+const unsigned long JSON_DOC_SIZE = 1024;														// The ArduinoJson document size, and size of some buffers.
+unsigned long publishInterval = 60000;															// The delay in milliseconds between MQTT publishes.  This prevents "flooding" the broker.
+unsigned long sensorPollInterval = 10000;														// The delay between polls of the sensor.  This should be greater than 100 milliseconds.
+unsigned long mqttReconnectInterval = 5000;													// The time between MQTT connection attempts.
+unsigned long wifiConnectionTimeout = 10000;													// The maximum amount of time in milliseconds to wait for a WiFi connection before trying a different SSID.
+unsigned long lastPublishTime = 0;																// Stores the time of the last MQTT publish.
+unsigned long lastPublish = 0;																	// This is used to determine the time since last MQTT publish.
+unsigned long bootTime = 0;																		// Stores the time of the most recent boot.
+unsigned long lastPollTime = 0;																	// Stores the time of the last sensor poll.
+unsigned long publishCount = 0;																	// A count of how many publishes have taken place.
+unsigned int networkIndex = 2112;																// An unsigned integer to hold the correct index for the network arrays: wifiSsidArray[], wifiPassArray[], mqttBrokerArray[], and mqttPortArray[].
+char ipAddress[16];																					// The IPv4 address of the WiFi interface.
+char macAddress[18];																					// The MAC address of the WiFi interface.
+long rssi;																								// A global to hold the Received Signal Strength Indicator.
+float tempC;																							// The sensor temperature in Celsius.
+float tempF;																							// The sensor temperature in Fahrenheit.
+float humidity;																						// The sensor relative humidity as a percetage.
+float voltage;																							// This holds the calculated voltage.
+int vref = 1100;																						// The number is used to tune for variances in the ADC.
+String ht30SerialNumber = "";																		// Typically something like 927334746.
 
 // Create class objects.
 WiFiClient espClient;							// Network client.
@@ -67,7 +100,7 @@ void onReceiveCallback( char* topic, byte* payload, unsigned int length )
 	}
 	Serial.println();
 	str[i] = 0; // Null termination
-	StaticJsonDocument <256> doc;
+	StaticJsonDocument <JSON_DOC_SIZE> doc;
 	deserializeJson( doc, str );
 
 	// The command can be: publishTelemetry, changeTelemetryInterval, changeSeaLevelPressure, or publishStatus.
@@ -89,9 +122,9 @@ void onReceiveCallback( char* topic, byte* payload, unsigned int length )
 		unsigned long tempValue = doc["value"];
 		// Only update the value if it is greater than 4 seconds.  This prevents a seconds vs. milliseconds mixup.
 		if( tempValue > 4000 )
-			publishDelay = tempValue;
+			publishInterval = tempValue;
 		Serial.print( "MQTT publish interval has been updated to " );
-		Serial.println( publishDelay );
+		Serial.println( publishInterval );
 		lastPublish = 0;
 	}
 	else if( strcmp( command, "changeSeaLevelPressure") == 0 )
@@ -117,7 +150,7 @@ void onReceiveCallback( char* topic, byte* payload, unsigned int length )
 } // End of onReceiveCallback() function.
 
 
-// This function puts the ESP32 into shallow sleep, which saves power compared to the traditional delay().
+// This function puts the ESP32 into light sleep, which saves power compared to the traditional delay().
 void espDelay( int ms )
 {
 	esp_sleep_enable_timer_wakeup( ms * 1000 );
@@ -176,10 +209,10 @@ void printResult( float temperature, float humidity, float voltage, long rssi )
 	tft.drawString( voltageString,	tft.width() / 2, tft.height() / 2 + 32 );
 
 	String min = " minutes";
-	if( loopCount == 1 )
+	if( publishCount == 1 )
 		min = " minute";
 	// Draw this line 48 pixels below middle.
-	tft.drawString( String ( loopCount ) + min, tft.width() / 2, tft.height() / 2 + 48 );
+	tft.drawString( String ( publishCount ) + min, tft.width() / 2, tft.height() / 2 + 48 );
 
 	String dBm = "dBm";
 	// Draw this line 64 pixels below middle.
@@ -192,11 +225,11 @@ void printResult( float temperature, float humidity, float voltage, long rssi )
  */
 void setup()
 {
-	delay( 500 );
+	espDelay( 500 );
 	// Start the Serial communication to send messages to the connected serial port.
 	Serial.begin( 115200 );
 	if( !Serial )
-		delay( 1000 );
+		espDelay( 1000 );
 	Serial.println( '\n' );
 	Serial.print( sketchName );
 	Serial.println( " is beginning its setup()." );
@@ -337,7 +370,7 @@ void initTFT()
 
 	tft.setSwapBytes( true );
 	tft.pushImage( 0, 0,	240, 135, daughters );
-	delay( 5000 );
+	espDelay( 5000 );
 	// Set the orientation where the antenna is up and the USB port is down.
 	tft.setRotation( 0 );
 	tft.fillScreen( TFT_BLACK );
@@ -368,7 +401,7 @@ void wifiConnect( int maxAttempts )
 	// Loop until WiFi has connected.
 	while( WiFi.status() != WL_CONNECTED && i < maxAttempts )
 	{
-		delay( 1000 );
+		espDelay( 1000 );
 		Serial.println( "Waiting for a connection..." );
 		Serial.print( "WiFi status: " );
 		Serial.println( WiFi.status() );
@@ -410,11 +443,11 @@ void mqttConnect( int maxAttempts )
 			Serial.print( mqttClient.state() );
 			Serial.println( " try again in 5 seconds" );
 			// Wait 5 seconds before retrying.
-			delay( 5000 );
+			espDelay( 5000 );
 		}
 		i++;
 	}
-	mqttClient.setBufferSize( 512 );
+	mqttClient.setBufferSize( JSON_DOC_SIZE );
 } // End of mqttConnect() function.
 
 
@@ -435,9 +468,9 @@ void publishTelemetry( SHT31D result )
 	printResult( result.t, result.rh, getVoltage(), rssi );
 
 	// Prepare a String to hold the JSON.
-	char mqttString[512];
+	char mqttString[JSON_DOC_SIZE];
 	// Write the readings to the String in JSON format.
-	snprintf( mqttString, 512, "{\n\t\"sketch\": \"%s\",\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"serial\": \"%s\",\n\t\"tempC\": %.2f,\n\t\"humidity\": %.1f,\n\t\"voltage\": %.2f,\n\t\"rssi\": %ld,\n\t\"uptime\": %d,\n\t\"notes\": \"%s\"\n}", sketchName, macAddress, ipAddress, ht30SerialNumber, result.t, result.rh, voltage, rssi, loopCount, notes );
+	snprintf( mqttString, JSON_DOC_SIZE, "{\n\t\"sketch\": \"%s\",\n\t\"mac\": \"%s\",\n\t\"ip\": \"%s\",\n\t\"serial\": \"%s\",\n\t\"tempC\": %.2f,\n\t\"humidity\": %.1f,\n\t\"voltage\": %.2f,\n\t\"rssi\": %ld,\n\t\"uptime\": %d,\n\t\"notes\": \"%s\"\n}", sketchName, macAddress, ipAddress, ht30SerialNumber, result.t, result.rh, voltage, rssi, publishCount, notes );
 	// Publish the JSON to the MQTT broker.
 	bool success = mqttClient.publish( mqttTopic, mqttString, false );
 	if( success )
@@ -480,10 +513,10 @@ void loop()
 
 	// ToDo: Move all this into a function, and call it from setup() and from loop().
 	unsigned long time = millis();
-	// When time is less than publishDelay, subtracting publishDelay from time causes an overlow which results in a very large number.
-	if( ( time > publishDelay ) && ( time - publishDelay ) > lastPublish )
+	// When time is less than publishInterval, subtracting publishInterval from time causes an overlow which results in a very large number.
+	if( ( time > publishInterval ) && ( time - publishInterval ) > lastPublish )
 	{
-		loopCount++;
+		publishCount++;
 		voltage = getVoltage();
 		Serial.println( sketchName );
 		Serial.print( "Connected to broker at \"" );
@@ -510,8 +543,6 @@ void loop()
 		}
 		// Clear the line.
 		tft.drawString( "                       ",  tft.width() / 2, tft.height() / 2 + 96 );
-	  	Serial.print( "Next publish in " );
-		Serial.print( publishDelay / 1000 );
-		Serial.println( " seconds.\n" );
+		Serial.printf( "Next MQTT publish in %lu seconds.\n\n", publishInterval / 1000 );
 	}
 } // End of loop() function.
