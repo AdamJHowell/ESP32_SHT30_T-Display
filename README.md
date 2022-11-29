@@ -9,11 +9,13 @@ HT30 sensor: https://www.banggood.com/GT-HT30-Module-SHT30-High-Precision-Digita
 
 ## Libraries
 
-TFT display library: https://github.com/Xinyuan-LilyGO/TTGO-T-Display
+LilyGo's TFT display library: https://github.com/Xinyuan-LilyGO/TTGO-T-Display
 
 HT30 library: https://github.com/closedcube/ClosedCube_SHT31D_Arduino
 
 Nick O'Leary's MQTT client: https://github.com/knolleary/pubsubclient
+
+Benoît Blanchon's ArduinoJson: https://arduinojson.org/
 
 
 ## Software

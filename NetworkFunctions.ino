@@ -88,8 +88,7 @@ void configureOTA()
 	// ToDo: Verify how stock Arduino code is meant to handle the port, username, and password.
 #endif
 	ArduinoOTA.setHostname( hostName );
-
-	Serial.printf( "Using hostname '%s'\n", hostName );
+	Serial.printf( "Using OTA hostname '%s'\n", hostName );
 
 	String type = "filesystem"; // SPIFFS
 	if( ArduinoOTA.getCommand() == U_FLASH )
