@@ -1,6 +1,6 @@
 .idea/
 *.iml
-privateInfo.h
+privateInfo.*
 debug_custom.json
 *.svd
 
@@ -10,7 +10,7 @@ bmp.h
 .vscode/
 .idea/
 *.iml
-privateInfo.h
+privateInfo.*
 networkVariables.h
 
 # Prerequisites
