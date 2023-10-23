@@ -9,7 +9,7 @@
  * onReceiveCallback() is a callback function to process MQTT subscriptions.
  * When a message comes in on a topic the MQTT client has subscribed to, this message is called.
  */
-void onReceiveCallback( char *topic, byte *payload, unsigned int length )
+void onReceiveCallback2( char *topic, byte *payload, unsigned int length )
 {
 	char str[length + 1];
 	Serial.print( "Message arrived [" );
@@ -260,7 +260,7 @@ bool mqttMultiConnect( int maxAttempts )
 				Serial.println( "Restarting the device!" );
 				ESP.restart();
 			}
-			publishStats();
+			//publishStats();
 			// Subscribe to the command topic.
 			if( mqttClient.subscribe( commandTopic ) )
 				Serial.printf( "Successfully subscribed to topic '%s'.\n", commandTopic );
