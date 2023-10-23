@@ -12,3 +12,4 @@ add_executable( ESP32_SHT30_T_Display
 		privateInfo.h )
 
 set_target_properties( ESP32_SHT30_T_Display PROPERTIES LINKER_LANGUAGE CXX )
+

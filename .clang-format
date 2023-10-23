@@ -3,7 +3,6 @@ BasedOnStyle:                         GNU
 TabWidth:                             3
 IndentWidth:                          3
 UseTab:                               Always
-#ColumnLimit:	100
 PenaltyIndentedWhitespace:            0
 
 AlignTrailingComments:                true
@@ -19,7 +18,6 @@ BreakBeforeBraces:                    Allman
 ColumnLimit:                          0
 IndentCaseLabels:                     true
 MaxEmptyLinesToKeep:                  2
-#PointerBindsToType:							false
 ReflowComments:                       false
 SortIncludes:                         Never
 

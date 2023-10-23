@@ -21,3 +21,4 @@ Benoît Blanchon's ArduinoJson: https://arduinojson.org/
 ## Software
 
 Online site to convert an image to the byte array format needed by the graphics library: http://www.rinkydinkelectronics.com/t_imageconverter565.php
+

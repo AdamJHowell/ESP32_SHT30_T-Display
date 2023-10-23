@@ -9,6 +9,7 @@ bmp.h
 .vscode/
 networkVariables.h
 
+
 # Prerequisites
 *.d
 
