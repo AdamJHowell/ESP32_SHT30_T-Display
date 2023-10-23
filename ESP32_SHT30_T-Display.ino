@@ -47,28 +47,25 @@
 
 // Device topic format: <location>/<device>/<metric>
 // Sensor topic format: <location>/<device>/<sensor>/<metric>
-const char *hostName = "T-Display_ESP32_SHT40_OTA";						  // The hostname used for OTA access.
+const char *hostName = "T-Display_ESP32_HT30_OTA";						  // The hostname used for OTA access.
 const char *notes = "LilyGo TFT with HT30 and OTA";						  // Notes sent in the bulk publish.
 const char *espControlTopic = "espControl";									  // This is a topic we subscribe to, to get updates.
-const char *commandTopic = "masterBedroom/tDisplay/command";			  // The topic used to subscribe to update the configuration.  Commands: publishTelemetry, changeTelemetryInterval, publishStatus.
-const char *sketchTopic = "masterBedroom/tDisplay/sketch";				  // The topic used to publish the sketch name.
-const char *macTopic = "masterBedroom/tDisplay/mac";						  // The topic used to publish the MAC address.
-const char *ipTopic = "masterBedroom/tDisplay/ip";							  // The topic used to publish the IP address.
-const char *rssiTopic = "masterBedroom/tDisplay/rssi";					  // The topic used to publish the Wi-Fi Received Signal Strength Indicator.
-const char *publishCountTopic = "masterBedroom/tDisplay/publishCount"; // The topic used to publish the loop count.
-const char *notesTopic = "masterBedroom/tDisplay/notes";					  // The topic used to publish notes relevant to this project.
-const char *tempCTopic = "masterBedroom/tDisplay/sht40/tempC";			  // The topic used to publish the temperature in Celsius.
-const char *tempFTopic = "masterBedroom/tDisplay/sht40/tempF";			  // The topic used to publish the temperature in Fahrenheit.
-const char *humidityTopic = "masterBedroom/tDisplay/sht40/humidity";	  // The topic used to publish the humidity.
-const char *mqttStatsTopic = "espStats";										  // The topic this device will publish to upon connection to the broker.
-const char *mqttTopic = "espWeather";											  // The topic used to publish a single JSON message containing all data.
+const char *commandTopic = "MasterBedroom/tDisplay/command";			  // The topic used to subscribe to update the configuration.  Commands: publishTelemetry, changeTelemetryInterval, publishStatus.
+const char *sketchTopic = "MasterBedroom/tDisplay/sketch";				  // The topic used to publish the sketch name.
+const char *macTopic = "MasterBedroom/tDisplay/mac";						  // The topic used to publish the MAC address.
+const char *ipTopic = "MasterBedroom/tDisplay/ip";							  // The topic used to publish the IP address.
+const char *rssiTopic = "MasterBedroom/tDisplay/rssi";					  // The topic used to publish the Wi-Fi Received Signal Strength Indicator.
+const char *publishCountTopic = "MasterBedroom/tDisplay/publishCount"; // The topic used to publish the loop count.
+const char *notesTopic = "MasterBedroom/tDisplay/notes";					  // The topic used to publish notes relevant to this project.
+const char *tempCTopic = "MasterBedroom/tDisplay/sht30/tempC";			  // The topic used to publish the temperature in Celsius.
+const char *tempFTopic = "MasterBedroom/tDisplay/sht30/tempF";			  // The topic used to publish the temperature in Fahrenheit.
+const char *humidityTopic = "MasterBedroom/tDisplay/sht30/humidity";	  // The topic used to publish the humidity.
 const unsigned long JSON_DOC_SIZE = 1024;										  // The ArduinoJson document size, and size of some buffers.
-unsigned long publishInterval = 60000;											  // The delay in milliseconds between MQTT publishes.  This prevents "flooding" the broker.
+unsigned long publishInterval = 20000;											  // The delay in milliseconds between MQTT publishes.  This prevents "flooding" the broker.
 unsigned long sensorPollInterval = 5000;										  // The delay between polls of the sensor.  This should be greater than 100 milliseconds.
 unsigned long mqttReconnectInterval = 5000;									  // The time between MQTT connection attempts.
 unsigned long wifiConnectionTimeout = 10000;									  // The maximum amount of time in milliseconds to wait for a Wi-Fi connection before trying a different SSID.
 unsigned long lastPublishTime = 0;												  // Stores the time of the last MQTT publish.
-unsigned long lastPublish = 0;													  // This is used to determine the time since last MQTT publish.
 unsigned long bootTime = 0;														  // Stores the time of the most recent boot.
 unsigned long lastPollTime = 0;													  // Stores the time of the last sensor poll.
 unsigned long publishCount = 0;													  // A count of how many publishes have taken place.
@@ -117,7 +114,7 @@ void onReceiveCallback( char *topic, byte *payload, unsigned int length )
 		readTelemetry();
 		if( result.error == SHT3XD_NO_ERROR )
 		{
-			publishTelemetry(  );
+			publishTelemetry();
 		}
 		Serial.println( "Readings have been published." );
 	}
@@ -130,7 +127,7 @@ void onReceiveCallback( char *topic, byte *payload, unsigned int length )
 			publishInterval = tempValue;
 		Serial.print( "MQTT publish interval has been updated to " );
 		Serial.println( publishInterval );
-		lastPublish = 0;
+		lastPublishTime = 0;
 	}
 	else if( strcmp( command, "changeSeaLevelPressure" ) == 0 )
 	{
@@ -225,121 +222,10 @@ void printResult()
 } // End of printResult() function.
 
 
-/**
- * The setup() function runs once when the device is booted, and then loop() takes over.
- */
-void setup()
-{
-	espDelay( 500 );
-	// Start the Serial communication to send messages to the connected serial port.
-	Serial.begin( 115200 );
-	if( !Serial )
-		espDelay( 1000 );
-	Serial.println( '\n' );
-	Serial.println( __FILE__ );
-	Serial.println( " is beginning its setup()." );
-	Wire.begin();
-
-	// Set the ipAddress char array to a default value.
-	snprintf( ipAddress, 16, "127.0.0.1" );
-
-	Serial.println( "Initializing the HT30 sensor..." );
-	// Initialize the HT30 sensor.
-	startSensor();
-
-	/*
-	ADC_EN is the Analog to Digital Converter detection enable port.
-	If the USB port is used for power supply, it is turned on by default.
-	If it is powered by battery, it needs to be set to high level.
-	*/
-	pinMode( ADC_EN, OUTPUT );
-	digitalWrite( ADC_EN, HIGH );
-
-	// Initialize the TFT screen.
-	initTFT();
-
-	// Set the MQTT client parameters.
-	mqttClient.setServer( mqttBroker, mqttPort );
-	mqttClient.setCallback( onReceiveCallback ); // Assign the onReceiveCallback() function to handle MQTT callbacks.
-
-	// Get the MAC address and store it in macAddress.
-	snprintf( macAddress, 18, "%s", WiFi.macAddress().c_str() );
-	Serial.print( "MAC address: " );
-	Serial.println( macAddress );
-
-	// Black-out the screen to ensure no stale data interferes.
-	tft.fillScreen( TFT_BLACK );
-	// Set the middle center (MC) as the reference point.
-	tft.setTextDatum( MC_DATUM );
-
-	readTelemetry();
-	// Print the results to the onboard TFT screen.
-	printResult();
-
-	String logString = "Connecting to WiFi...";
-	// Draw this line centered horizontally, and near the bottom of the screen.
-	tft.drawString( logString, tft.width() / 2, tft.height() / 2 + 96 );
-
-	// Try to connect to the configured Wi-Fi network, up to 10 times.
-	wifiConnect( 10 );
-
-	// Port defaults to 3232
-	// ArduinoOTA.setPort( 3232 );
-
-	// Hostname defaults to esp32-[MAC]
-	ArduinoOTA.setHostname( hostName );
-	Serial.printf( "Using OTA hostname '%s'\n", hostName );
-
-	// No authentication by default
-	// ArduinoOTA.setPassword( "admin" );
-
-	// Password can be set with it's md5 value as well
-	// MD5( admin ) = 21232f297a57a5a743894a0e4a801fc3
-	// ArduinoOTA.setPasswordHash( "21232f297a57a5a743894a0e4a801fc3" );
-
-	ArduinoOTA
-		 .onStart( []()
-					  {
-			String type;
-			if( ArduinoOTA.getCommand() == U_FLASH )
-				type = "sketch";
-			else // U_SPIFFS
-				type = "filesystem";
-
-			// NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
-			Serial.println( "Start updating " + type ); } )
-		 .onEnd( []()
-					{ Serial.println( "\nEnd" ); } )
-		 .onProgress( []( unsigned int progress, unsigned int total )
-						  { Serial.printf( "Progress: %u%%\r", ( progress / ( total / 100 ) ) ); } )
-		 .onError( []( ota_error_t error )
-					  {
-			Serial.printf( "Error[%u]: ", error );
-			if( error == OTA_AUTH_ERROR )
-				Serial.println( "Auth Failed" );
-			else if( error == OTA_BEGIN_ERROR )
-				Serial.println( "Begin Failed" );
-			else if( error == OTA_CONNECT_ERROR )
-				Serial.println( "Connect Failed" );
-			else if( error == OTA_RECEIVE_ERROR )
-				Serial.println( "Receive Failed" );
-			else if( error == OTA_END_ERROR )
-				Serial.println( "End Failed" ); } );
-
-	ArduinoOTA.begin();
-
-	// Print the current values.
-	readTelemetry();
-	// Print the results to the onboard TFT screen.
-	printResult();
-
-	lastPublish = 0;
-} // End of setup() function.
-
-
 void startSensor()
 {
 	sht30.begin( 0x44 ); // I2C address: 0x44 or 0x45
+	sht30.heaterDisable();
 	ht30SerialNumber = sht30.readSerialNumber();
 	Serial.print( "Serial # " );
 	Serial.println( ht30SerialNumber );
@@ -351,6 +237,7 @@ void startSensor()
 
 void initTFT()
 {
+	Serial.println( "Initializing the TFT..." );
 	// Initialize the TFT driver.
 	tft.init();
 	// Set the orientation where the antenna is on the left and the USB port is on the right.
@@ -368,12 +255,14 @@ void initTFT()
 	tft.setTextSize( 1 );
 
 	tft.setSwapBytes( true );
+	Serial.println( "Displaying the image and pausing 5 seconds." );
 	tft.pushImage( 0, 0, 240, 135, daughters );
 	espDelay( 5000 );
 	// Set the orientation where the antenna is up and the USB port is down.
 	tft.setRotation( 0 );
 	tft.fillScreen( TFT_BLACK );
 	tft.setTextDatum( MC_DATUM );
+	Serial.println( "TFT initialization complete." );
 } // End of initTFT() function.
 
 
@@ -404,7 +293,7 @@ void wifiConnect( int maxAttempts )
 	// Loop until Wi-Fi has connected.
 	while( WiFi.status() != WL_CONNECTED && i < maxAttempts )
 	{
-		espDelay( 1000 );
+		delay( 1000 );
 		Serial.println( "Waiting for a connection..." );
 		Serial.print( "WiFi status: " );
 		Serial.println( WiFi.status() );
@@ -491,9 +380,117 @@ void publishTelemetry()
 	dtostrf( humidity, 1, 3, buffer );
 	if( mqttClient.publish( humidityTopic, buffer, false ) )
 		Serial.printf( "  %s\n", humidityTopic );
-
-	lastPublish = millis();
 } // End of the publishTelemetry() function.
+
+
+/**
+ * The setup() function runs once when the device is booted, and then loop() takes over.
+ */
+void setup()
+{
+	espDelay( 500 );
+	// Start the Serial communication to send messages to the connected serial port.
+	Serial.begin( 115200 );
+	if( !Serial )
+		espDelay( 1000 );
+	Serial.println( '\n' );
+	Serial.println( __FILE__ );
+	Serial.println( " is beginning its setup()." );
+	Wire.begin();
+
+	// Set the ipAddress char array to a default value.
+	snprintf( ipAddress, 16, "127.0.0.1" );
+
+	Serial.println( "Initializing the HT30 sensor..." );
+	// Initialize the HT30 sensor.
+	startSensor();
+
+	/*
+	ADC_EN is the Analog to Digital Converter detection enable port.
+	If the USB port is used for power supply, it is turned on by default.
+	If it is powered by battery, it needs to be set to high level.
+	*/
+	pinMode( ADC_EN, OUTPUT );
+	digitalWrite( ADC_EN, HIGH );
+
+	// Initialize the TFT screen.
+	initTFT();
+
+	// Set the MQTT client parameters.
+	mqttClient.setServer( mqttBroker, mqttPort );
+	mqttClient.setCallback( onReceiveCallback ); // Assign the onReceiveCallback() function to handle MQTT callbacks.
+
+	// Get the MAC address and store it in macAddress.
+	snprintf( macAddress, 18, "%s", WiFi.macAddress().c_str() );
+	Serial.print( "MAC address: " );
+	Serial.println( macAddress );
+
+	// Black-out the screen to ensure no stale data interferes.
+	tft.fillScreen( TFT_BLACK );
+	// Set the middle center (MC) as the reference point.
+	tft.setTextDatum( MC_DATUM );
+
+	readTelemetry();
+	// Print the results to the onboard TFT screen.
+	printResult();
+
+	String logString = "Connecting to WiFi...";
+	// Draw this line centered horizontally, and near the bottom of the screen.
+	tft.drawString( logString, tft.width() / 2, tft.height() / 2 + 96 );
+
+	// Try to connect to the configured Wi-Fi network, up to 10 times.
+	wifiConnect( 10 );
+
+	// Port defaults to 3232
+	// ArduinoOTA.setPort( 3232 );
+
+	// Hostname defaults to esp32-[MAC]
+	ArduinoOTA.setHostname( hostName );
+	Serial.printf( "Using OTA hostname '%s'\n", hostName );
+
+	// No authentication by default
+	// ArduinoOTA.setPassword( "admin" );
+
+	// Password can be set with it's md5 value as well
+	// MD5( admin ) = 21232f297a57a5a743894a0e4a801fc3
+	// ArduinoOTA.setPasswordHash( "21232f297a57a5a743894a0e4a801fc3" );
+
+	ArduinoOTA
+		 .onStart( []()
+					  {
+						  String type;
+						  if( ArduinoOTA.getCommand() == U_FLASH )
+							  type = "sketch";
+						  else // U_SPIFFS
+							  type = "filesystem";
+
+						  // NOTE: if updating SPIFFS this would be the place to unmount SPIFFS using SPIFFS.end()
+						  Serial.println( "Start updating " + type ); } )
+		 .onEnd( []()
+					{ Serial.println( "\nEnd" ); } )
+		 .onProgress( []( unsigned int progress, unsigned int total )
+						  { Serial.printf( "Progress: %u%%\r", ( progress / ( total / 100 ) ) ); } )
+		 .onError( []( ota_error_t error )
+					  {
+						  Serial.printf( "Error[%u]: ", error );
+						  if( error == OTA_AUTH_ERROR )
+							  Serial.println( "Auth Failed" );
+						  else if( error == OTA_BEGIN_ERROR )
+							  Serial.println( "Begin Failed" );
+						  else if( error == OTA_CONNECT_ERROR )
+							  Serial.println( "Connect Failed" );
+						  else if( error == OTA_RECEIVE_ERROR )
+							  Serial.println( "Receive Failed" );
+						  else if( error == OTA_END_ERROR )
+							  Serial.println( "End Failed" ); } );
+
+	ArduinoOTA.begin();
+
+	// Print the current values.
+	readTelemetry();
+	// Print the results to the onboard TFT screen.
+	printResult();
+} // End of setup() function.
 
 
 /**
@@ -529,12 +526,12 @@ void loop()
 	{
 		readTelemetry();
 		printResult();
-		lastPollTime = millis();
 		Serial.printf( "Next telemetry poll in %lu seconds.\n\n", sensorPollInterval / 1000 );
+		lastPollTime = millis();
 	}
 
 	time = millis();
-	if( lastPublish == 0 || ( time - publishInterval ) > lastPublish )
+	if( ( time > publishInterval ) && ( time - publishInterval ) > lastPublishTime )
 	{
 		// If the reading from the SHT30 library was valid.
 		if( result.error == SHT3XD_NO_ERROR )
@@ -552,5 +549,6 @@ void loop()
 		// Clear the line.
 		tft.drawString( "                       ", tft.width() / 2, tft.height() / 2 + 96 );
 		Serial.printf( "Next MQTT publish in %lu seconds.\n\n", publishInterval / 1000 );
+		lastPublishTime = millis();
 	}
 } // End of loop() function.
